@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Image from "next/image";
 
 type Transaction = {
@@ -24,9 +24,54 @@ export default function Home() {
   const [type, setType] = useState<"income" | "expense">("expense");
   const [imageFile, setImageFile] = useState<File | null>(null);
   
-  // State สถานะกำลังบันทึก
+  // State สถานะกำลังโหลด/บันทึก
   const [loading, setLoading] = useState<boolean>(false);
+  const [initialLoading, setInitialLoading] = useState<boolean>(true);
 
+  // 🔄 1. ดึงข้อมูลจาก Google Sheet เมื่อเปิดหน้าเว็บครั้งแรก
+  const fetchTransactions = async () => {
+    try {
+      const res = await fetch('/api/transactions');
+      const result = await res.json();
+
+      if (result.success && Array.isArray(result.data)) {
+        // แปลงข้อมูลจาก Google Sheet ให้ตรงกับประเภท Transaction
+        const formattedTx: Transaction[] = result.data.map((item: any, index: number) => {
+          const isIncome = item.type === "รายรับ";
+          return {
+            id: index + 1,
+            type: isIncome ? "income" : "expense",
+            amount: Number(item.amount) || 0,
+            category: item.category || "-",
+            note: item.note || "",
+            imageUrl: item.imageUrl || null,
+            date: item.date || "",
+          };
+        });
+
+        // เรียงจากรายการล่าสุดขึ้นก่อน
+        const reversedTx = [...formattedTx].reverse();
+        setTransactions(reversedTx);
+
+        // คำนวณยอดเงินคงเหลือรวมทั้งหมด
+        const totalBalance = formattedTx.reduce((acc, curr) => {
+          return curr.type === "income" ? acc + curr.amount : acc - curr.amount;
+        }, 0);
+
+        setBalance(totalBalance);
+      }
+    } catch (error) {
+      console.error("ไม่สามารถดึงข้อมูลรายการได้:", error);
+    } finally {
+      setInitialLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTransactions();
+  }, []);
+
+  // 📝 2. ฟังก์ชันบันทึกข้อมูลใหม่
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!amount || isNaN(Number(amount))) return alert("กรุณาระบุจำนวนเงินให้ถูกต้อง");
@@ -38,45 +83,32 @@ export default function Home() {
     setLoading(true);
 
     try {
-      // 1. ส่งข้อมูลไปบันทึกลง Google Sheet ผ่าน API
+      const formData = new FormData();
+      formData.append("date", dateStr);
+      formData.append("type", type === "income" ? "รายรับ" : "รายจ่าย");
+      formData.append("category", txCategory);
+      formData.append("amount", amount);
+      formData.append("note", note);
+
+      if (imageFile) {
+        formData.append("file", imageFile);
+      }
+
       const res = await fetch('/api/transactions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          date: dateStr,
-          type: type === "income" ? "รายรับ" : "รายจ่าย",
-          category: txCategory,
-          amount: numAmount,
-          note: note,
-        }),
+        body: formData,
       });
 
       const result = await res.json();
 
       if (!result.success) {
-        alert("เกิดข้อผิดพลาดในการบันทึกลง Google Sheet: " + result.error);
+        alert("เกิดข้อผิดพลาดในการบันทึก: " + result.error);
         setLoading(false);
         return;
       }
 
-      // 2. เมื่อบันทึกลง Sheet สำเร็จ ให้คำนวณยอดเงินและอัปเดตประวัติหน้าเว็บ
-      if (type === "income") {
-        setBalance((prev) => prev + numAmount);
-      } else {
-        setBalance((prev) => prev - numAmount);
-      }
-
-      const newTx: Transaction = {
-        id: Date.now(),
-        type,
-        amount: numAmount,
-        category: txCategory,
-        note,
-        imageUrl: imageFile ? URL.createObjectURL(imageFile) : null,
-        date: dateStr,
-      };
-
-      setTransactions([newTx, ...transactions]);
+      // รีโหลดข้อมูลใหม่จาก Google Sheet เพื่ออัปเดตยอดและรายการล่าสุดให้แม่นยำที่สุด
+      await fetchTransactions();
 
       // เคลียร์ฟอร์ม
       setAmount("");
@@ -195,7 +227,10 @@ export default function Home() {
         {/* History Section */}
         <div className="p-8 bg-gray-50">
           <h3 className="text-xl font-semibold mb-4 text-gray-800">ประวัติการใช้จ่าย</h3>
-          {transactions.length === 0 ? (
+          
+          {initialLoading ? (
+            <p className="text-center text-gray-500 py-4">กำลังโหลดข้อมูลจาก Google Sheet...</p>
+          ) : transactions.length === 0 ? (
             <p className="text-center text-gray-500 py-4">ยังไม่มีรายการบัญชี เริ่มต้นบันทึกเลย!</p>
           ) : (
             <div className="space-y-4">
@@ -213,7 +248,16 @@ export default function Home() {
                   
                   <div className="text-right flex items-center gap-4">
                     {tx.imageUrl && (
-                      <Image src={tx.imageUrl} alt="Receipt" width={40} height={40} className="rounded-md object-cover h-10 w-10 border border-gray-200" />
+                      <a href={tx.imageUrl} target="_blank" rel="noopener noreferrer" title="ดูรูปใบเสร็จ">
+                        <Image 
+                          src={tx.imageUrl} 
+                          alt="Receipt" 
+                          width={40} 
+                          height={40} 
+                          unoptimized
+                          className="rounded-md object-cover h-10 w-10 border border-gray-200 hover:opacity-80 transition cursor-pointer" 
+                        />
+                      </a>
                     )}
                     <span className={`font-bold ${tx.type === "income" ? "text-green-500" : "text-red-500"}`}>
                       {tx.type === "income" ? "+" : "-"}฿{tx.amount.toLocaleString()}

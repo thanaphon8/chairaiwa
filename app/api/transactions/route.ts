@@ -1,7 +1,6 @@
-import { google } from 'googleapis';
 import { NextResponse } from 'next/server';
-import { Readable } from 'stream';
 
+// 1. POST: รับข้อมูลจากหน้าเว็บ แล้วส่งไปบันทึกลง Google Sheet / Drive
 export async function POST(req: Request) {
   try {
     const contentType = req.headers.get('content-type') || '';
@@ -11,9 +10,10 @@ export async function POST(req: Request) {
     let category = '';
     let amount = 0;
     let note = '';
-    let file: File | null = null;
+    let fileBase64 = '';
+    let fileName = '';
+    let fileType = '';
 
-    // 1. ตรวจสอบชนิดข้อมูลที่ส่งมาจากหน้าเว็บ (รองรับทั้ง FormData และ JSON)
     if (contentType.includes('multipart/form-data')) {
       const formData = await req.formData();
       date = (formData.get('date') as string) || '';
@@ -21,7 +21,14 @@ export async function POST(req: Request) {
       category = (formData.get('category') as string) || '';
       amount = Number(formData.get('amount')) || 0;
       note = (formData.get('note') as string) || '';
-      file = formData.get('file') as File | null;
+
+      const file = formData.get('file') as File | null;
+      if (file && file.size > 0) {
+        fileName = file.name;
+        fileType = file.type;
+        const arrayBuffer = await file.arrayBuffer();
+        fileBase64 = Buffer.from(arrayBuffer).toString('base64');
+      }
     } else {
       const json = await req.json();
       date = json.date || '';
@@ -31,72 +38,84 @@ export async function POST(req: Request) {
       note = json.note || '';
     }
 
-    // 2. ยืนยันตัวตนกับ Google API
-    let rawPrivateKey = process.env.GOOGLE_PRIVATE_KEY || '';
-    const privateKey = rawPrivateKey.replace(/^"(.*)"$/, '$1').replace(/\\n/g, '\n');
+    const GAS_WEB_APP_URL = process.env.GOOGLE_APPS_SCRIPT_URL || '';
 
-    const auth = new google.auth.GoogleAuth({
-      credentials: {
-        client_email: process.env.GOOGLE_CLIENT_EMAIL,
-        private_key: privateKey,
-      },
-      scopes: [
-        'https://www.googleapis.com/auth/spreadsheets',
-        'https://www.googleapis.com/auth/drive',
-      ],
-    });
-
-    let imageUrl = '';
-
-    // 3. ถ้ามีการแนบรูปภาพมา ให้อัปโหลดลง Google Drive
-    if (file && file.size > 0) {
-      const drive = google.drive({ version: 'v3', auth });
-      const buffer = Buffer.from(await file.arrayBuffer());
-      const stream = Readable.from(buffer);
-
-      const driveResponse = await drive.files.create({
-        requestBody: {
-          name: `receipt_${Date.now()}_${file.name}`,
-          parents: process.env.GOOGLE_DRIVE_FOLDER_ID ? [process.env.GOOGLE_DRIVE_FOLDER_ID] : [],
-        },
-        media: {
-          mimeType: file.type,
-          body: stream,
-        },
-        fields: 'id, webViewLink',
-      });
-
-      const fileId = driveResponse.data.id;
-      imageUrl = driveResponse.data.webViewLink || '';
-
-      // เปิดสิทธิ์ให้ทุกคนที่มีลิงก์สามารถเปิดดูรูปใบเสร็จได้ (ไม่ติด Permission Denied)
-      if (fileId) {
-        await drive.permissions.create({
-          fileId: fileId,
-          requestBody: {
-            role: 'reader',
-            type: 'anyone',
-          },
-        });
-      }
+    if (!GAS_WEB_APP_URL) {
+      throw new Error('ยังไม่ได้ระบุ GOOGLE_APPS_SCRIPT_URL ในไฟล์ .env.local');
     }
 
-    // 4. บันทึกข้อมูลลง Google Sheet (Column A ถึง F)
-    const sheets = google.sheets({ version: 'v4', auth });
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: 'Sheet1!A:F',
-      valueInputOption: 'USER_ENTERED',
-      requestBody: {
-        values: [
-          [date, type, category, amount, note, imageUrl]
-        ],
+    // ส่งข้อมูลไปยัง Google Apps Script แบบ text/plain
+    const response = await fetch(GAS_WEB_APP_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8',
       },
+      redirect: 'follow',
+      body: JSON.stringify({
+        date,
+        type,
+        category,
+        amount,
+        note,
+        fileBase64,
+        fileName,
+        fileType,
+      }),
     });
 
-    return NextResponse.json({ success: true, imageUrl });
+    const responseText = await response.text();
+
+    let result;
+    try {
+      result = JSON.parse(responseText);
+    } catch (e) {
+      console.error("Google Apps Script Error Response:", responseText);
+      throw new Error("Google Apps Script ตอบกลับข้อมูลที่ไม่ถูกต้อง (โปรดตรวจสอบการ Deploy สิทธิ์ 'Anyone')");
+    }
+
+    if (!result.success) {
+      throw new Error(result.error || 'บันทึกข้อมูลไม่สำเร็จ');
+    }
+
+    return NextResponse.json({ success: true, imageUrl: result.imageUrl });
   } catch (error: any) {
-    console.error("API Error:", error);
+    console.error("API POST Error:", error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+}
+
+// 2. GET: ดึงรายการทั้งหมดจาก Google Sheet กลับมาแสดงผลบนหน้าเว็บ
+export async function GET() {
+  try {
+    const GAS_WEB_APP_URL = process.env.GOOGLE_APPS_SCRIPT_URL || '';
+
+    if (!GAS_WEB_APP_URL) {
+      throw new Error('ยังไม่ได้ระบุ GOOGLE_APPS_SCRIPT_URL ในไฟล์ .env.local');
+    }
+
+    const response = await fetch(GAS_WEB_APP_URL, {
+      method: 'GET',
+      redirect: 'follow',
+      cache: 'no-store', // เพื่อให้ได้ข้อมูลล่าสุดเสมอ ไม่จำแคชเก่า
+    });
+
+    const responseText = await response.text();
+
+    let result;
+    try {
+      result = JSON.parse(responseText);
+    } catch (e) {
+      console.error("Google Apps Script Error Response:", responseText);
+      throw new Error("Google Apps Script ตอบกลับข้อมูลที่ไม่ถูกต้อง");
+    }
+
+    if (!result.success) {
+      throw new Error(result.error || 'ดึงข้อมูลไม่สำเร็จ');
+    }
+
+    return NextResponse.json({ success: true, data: result.data });
+  } catch (error: any) {
+    console.error("API GET Error:", error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
