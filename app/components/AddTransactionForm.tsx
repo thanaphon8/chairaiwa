@@ -286,6 +286,7 @@ export default function AddTransactionForm({
             <input
               type="number"
               step="any"
+              inputMode="decimal"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               className="w-full border border-gray-200 rounded-full py-3.5 pl-11 pr-5 focus:ring-2 focus:ring-zinc-900 outline-none bg-gray-50 text-gray-900 font-bold text-base sm:text-2xl"
