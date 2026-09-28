@@ -52,7 +52,8 @@ export default function Home() {
             amount: Number(item.amount) || 0,
             category: item.category || "-",
             note: item.note || "",
-            imageUrl: item.imageUrl || null,
+            // เผื่อกรณีคีย์ชื่อ imageUrl, image หรือ fileUrl
+            imageUrl: item.imageUrl || item.image || item.fileUrl || null,
             date: item.date || "",
           };
         });
@@ -328,7 +329,7 @@ export default function Home() {
               {filteredTransactions.map((tx) => (
                 <div key={tx.id} className="p-4 rounded-2xl bg-gray-50 hover:bg-gray-100/80 transition flex items-center justify-between border border-gray-100">
                   <div className="flex items-center gap-3.5">
-                    <div className="w-12 h-12 rounded-2xl bg-white shadow-sm flex items-center justify-center text-2xl border border-gray-100">
+                    <div className="w-12 h-12 rounded-2xl bg-white shadow-sm flex items-center justify-center text-2xl border border-gray-100 shrink-0">
                       {getCategoryIcon(tx.category, tx.type)}
                     </div>
                     <div>
@@ -340,22 +341,26 @@ export default function Home() {
                   </div>
                   
                   <div className="text-right flex items-center gap-3">
-                    {tx.imageUrl && (
+                    {/* 🖼️ แสดงรูปภาพ Thumbnail ถ้ามีรูป */}
+                    {tx.imageUrl ? (
                       <button
+                        type="button"
                         onClick={() => setSelectedImage(tx.imageUrl)}
-                        className="relative group focus:outline-none"
+                        className="relative group focus:outline-none shrink-0"
+                        title="คลิกเพื่อดูรูปภาพขยายใหญ่"
                       >
                         <Image 
                           src={tx.imageUrl} 
                           alt="Receipt" 
-                          width={40} 
-                          height={40} 
+                          width={44} 
+                          height={44} 
                           unoptimized
-                          className="rounded-xl object-cover h-10 w-10 border border-gray-200 group-hover:scale-105 transition shadow-sm" 
+                          className="rounded-xl object-cover h-11 w-11 border border-gray-200 group-hover:scale-105 transition shadow-sm" 
                         />
                       </button>
-                    )}
-                    <span className={`font-extrabold text-base ${tx.type === "income" ? "text-green-600" : "text-red-500"}`}>
+                    ) : null}
+
+                    <span className={`font-extrabold text-base whitespace-nowrap ${tx.type === "income" ? "text-green-600" : "text-red-500"}`}>
                       {tx.type === "income" ? "+" : "-"}฿{tx.amount.toLocaleString()}
                     </span>
                   </div>
@@ -373,8 +378,12 @@ export default function Home() {
           className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
           onClick={() => setSelectedImage(null)}
         >
-          <div className="relative max-w-lg w-full bg-white rounded-3xl p-4 overflow-hidden shadow-2xl">
+          <div 
+            className="relative max-w-lg w-full bg-white rounded-3xl p-4 overflow-hidden shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
             <button 
+              type="button"
               onClick={() => setSelectedImage(null)}
               className="absolute top-4 right-4 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-full w-8 h-8 flex items-center justify-center font-bold z-10"
             >

@@ -1,5 +1,21 @@
 import { NextResponse } from 'next/server';
 
+// 💡 Helper Function: แปลง Google Drive Link ให้เป็น Direct Link สำหรับแสดงรูปภาพ
+function formatGoogleDriveUrl(url: string | null | undefined): string | null {
+  if (!url || typeof url !== 'string') return null;
+
+  // ตรวจจับ File ID ของ Google Drive จาก URL รูปแบบต่างๆ
+  const driveRegex = /(?:id=|\/d\/|\/file\/d\/)([a-zA-Z0-9_-]+)/;
+  const match = url.match(driveRegex);
+
+  if (match && match[1]) {
+    // ใช้ CDN ของ Google (lh3.googleusercontent.com) เพื่อโหลดรูปภาพได้รวดเร็วและไม่ติดปัญหาการแสดงผล
+    return `https://lh3.googleusercontent.com/d/${match[1]}`;
+  }
+
+  return url; // หากเป็น URL ทั่วไปอยู่แล้วให้ส่งกลับค่าเดิม
+}
+
 // 1. POST: รับข้อมูลจากหน้าเว็บ แล้วส่งไปบันทึกลง Google Sheet / Drive
 export async function POST(req: Request) {
   try {
@@ -77,7 +93,10 @@ export async function POST(req: Request) {
       throw new Error(result.error || 'บันทึกข้อมูลไม่สำเร็จ');
     }
 
-    return NextResponse.json({ success: true, imageUrl: result.imageUrl });
+    // แปลง URL รูปภาพก่อนส่งกลับหน้าบ้าน
+    const formattedImageUrl = formatGoogleDriveUrl(result.imageUrl || result.image || result.fileUrl);
+
+    return NextResponse.json({ success: true, imageUrl: formattedImageUrl });
   } catch (error: any) {
     console.error("API POST Error:", error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
@@ -113,7 +132,18 @@ export async function GET() {
       throw new Error(result.error || 'ดึงข้อมูลไม่สำเร็จ');
     }
 
-    return NextResponse.json({ success: true, data: result.data });
+    // 🔄 แปลง URL รูปภาพของทุกรายการใน data ให้เป็น Direct Link
+    const formattedData = Array.isArray(result.data)
+      ? result.data.map((item: any) => {
+          const rawUrl = item.imageUrl || item.image || item.fileUrl || item.file_url || null;
+          return {
+            ...item,
+            imageUrl: formatGoogleDriveUrl(rawUrl),
+          };
+        })
+      : [];
+
+    return NextResponse.json({ success: true, data: formattedData });
   } catch (error: any) {
     console.error("API GET Error:", error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
