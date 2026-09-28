@@ -57,7 +57,7 @@ export default function Home() {
   // 🔄 1. ดึงข้อมูลจาก Google Sheet
   const fetchTransactions = async () => {
     try {
-      const res = await fetch('/api/transactions');
+      const res = await fetch('/api/transactions', { cache: 'no-store' });
       const result = await res.json();
 
       if (result.success && Array.isArray(result.data)) {
@@ -70,7 +70,7 @@ export default function Home() {
             category: item.category || "-",
             note: item.note || "",
             imageUrl: item.imageUrl || item.image || item.fileUrl || null,
-            // รับค่า String วันที่และเวลาจาก Google Sheet โดยตรงแบบไม่ผ่านการดัดแปลง
+            // รับค่า String วันที่และเวลาจาก Google Sheet โดยตรงแบบไม่ตัดแต่งหรือแปลง Date
             date: String(item.date || "").trim(),
           };
         });
@@ -101,7 +101,7 @@ export default function Home() {
     fetchTransactions();
   }, []);
 
-  // 📝 2. ฟังก์ชันบันทึกข้อมูลใหม่ (บันทึกเวลา Local ของไทยลง Sheet)
+  // 📝 2. บันทึกข้อมูล
   const submitData = async () => {
     if (!amount || isNaN(Number(amount))) {
       alert("กรุณาระบุจำนวนเงินให้ถูกต้อง");
@@ -109,7 +109,7 @@ export default function Home() {
       return;
     }
 
-    // สร้าง String วันที่และเวลา ณ ปัจจุบันในรูปแบบ Local ไทย (เช่น 28/09/2569 13:13:35)
+    // สร้างข้อความวันที่และเวลาไทยส่งไปบันทึก
     const now = new Date();
     const d = String(now.getDate()).padStart(2, "0");
     const m = String(now.getMonth() + 1).padStart(2, "0");
@@ -242,41 +242,29 @@ export default function Home() {
     });
   }, [transactions, searchTerm, filterCategory]);
 
-  // 🛠️ ฟังก์ชันสกัดส่วนวันที่จาก String ของ Google Sheet
+  // 🛠️ 1. สกัดวันที่จากข้อความ Sheet ตรงๆ (เอาส่วนแรกก่อนเว้นวรรค หรือคั่น T)
   const extractDateOnly = (rawStr: string) => {
     if (!rawStr) return "ไม่ระบุวันที่";
-    
-    // ตัดด้วยตัวคั่น T หรือ ช่องว่าง เพื่อเอาเฉพาะส่วนวันที่ด้านหน้า
     const parts = rawStr.split(/[T\s]+/);
     return parts[0].trim();
   };
 
-  // ⏰ ฟังก์ชันสกัดส่วนเวลา (HH:mm) จาก String ของ Google Sheet ตรงๆ
+  // ⏰ 2. สกัดเวลาจากข้อความ Sheet ตรงๆ (ค้นหาชุดตัวเลข HH:mm ที่ปรากฏในข้อความ)
   const extractTimeOnly = (rawStr: string) => {
     if (!rawStr) return "";
 
-    // 1. กรณีเป็น ISO รูปแบบ 2026-09-28T13:13:35.000Z
-    if (rawStr.includes("T")) {
-      const timePart = rawStr.split("T")[1];
-      if (timePart) {
-        const timeWithoutZ = timePart.replace("Z", "");
-        const [h, m] = timeWithoutZ.split(":");
-        if (h && m) return `${h.padStart(2, "0")}:${m.padStart(2, "0")} น.`;
-      }
-    }
-
-    // 2. กรณีเป็น String รูปแบบ "28/09/2569 13:13:35" หรือ "2026-09-28 13:13"
-    const match = rawStr.match(/(\d{1,2}):(\d{2})/);
-    if (match) {
-      const h = match[1].padStart(2, "0");
-      const m = match[2].padStart(2, "0");
-      return `${h}:${m} น.`;
+    // ค้นหาแพตเทิร์นเวลา ตัวเลข 1-2 หลัก คั่นด้วย : และตัวเลข 2 หลัก (เช่น 13:30 หรือ 08:05)
+    const timeMatch = rawStr.match(/(\d{1,2}):(\d{2})/);
+    if (timeMatch) {
+      const hours = timeMatch[1].padStart(2, "0");
+      const minutes = timeMatch[2];
+      return `${hours}:${minutes} น.`;
     }
 
     return "";
   };
 
-  // 📅 จัดกลุ่มรายการตาม String วันที่ที่ได้มาจาก Google Sheet
+  // 📅 จัดกลุ่มรายการตาม String วันที่จาก Google Sheet
   const groupedTransactions = useMemo(() => {
     const groups: { [key: string]: { label: string; items: Transaction[] } } = {};
 
@@ -286,7 +274,7 @@ export default function Home() {
     const yearCE = now.getFullYear();
     const yearBE = yearCE + 543;
 
-    // รูปแบบวันที่ของวันนี้ทุกประเภท เพื่อเทียบคำว่า "วันนี้"
+    // รูปแบบวันที่ของวันนี้ทุกประเภท เพื่อเทียบป้าย "วันนี้"
     const todayFormats = [
       `${yearCE}-${month}-${day}`,
       `${day}/${month}/${yearBE}`,
@@ -592,7 +580,7 @@ export default function Home() {
                               <p className="font-bold text-gray-800 text-xs sm:text-sm">
                                 {tx.category} {tx.note && <span className="text-gray-500 font-normal">({tx.note})</span>}
                               </p>
-                              {/* ⏰ เวลาที่โหลดและดึงตรงมาจาก Google Sheet */}
+                              {/* ⏰ เวลาที่ดึงจากตัวเลขข้อความบน Sheet โดยตรง */}
                               {timeStr && (
                                 <p className="text-[11px] text-gray-400 mt-0.5 font-medium flex items-center gap-1">
                                   <span>🕒</span> {timeStr}
