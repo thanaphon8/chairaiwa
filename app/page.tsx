@@ -13,7 +13,7 @@ type Transaction = {
   date: string;
 };
 
-// รายการหมวดหมู่พร้อมรูปภาพจาก public/img/ (เพิ่ม "ความบันเทิง" ก่อน "อื่นๆ")
+// รายการหมวดหมู่พร้อมรูปภาพจาก public/img/
 const CATEGORIES = [
   { id: "อาหาร", label: "อาหาร/เครื่องดื่ม", image: "/img/food.png" },
   { id: "เดินทาง", label: "เดินทาง", image: "/img/taxi.png" },
@@ -70,7 +70,8 @@ export default function Home() {
             category: item.category || "-",
             note: item.note || "",
             imageUrl: item.imageUrl || item.image || item.fileUrl || null,
-            date: item.date || "",
+            // รับค่า String วันที่และเวลาจาก Google Sheet โดยตรงแบบไม่ผ่านการดัดแปลง
+            date: String(item.date || "").trim(),
           };
         });
 
@@ -100,7 +101,7 @@ export default function Home() {
     fetchTransactions();
   }, []);
 
-  // 📝 2. ฟังก์ชันบันทึกข้อมูลใหม่
+  // 📝 2. ฟังก์ชันบันทึกข้อมูลใหม่ (บันทึกเวลา Local ของไทยลง Sheet)
   const submitData = async () => {
     if (!amount || isNaN(Number(amount))) {
       alert("กรุณาระบุจำนวนเงินให้ถูกต้อง");
@@ -108,14 +109,23 @@ export default function Home() {
       return;
     }
 
-    const dateStr = new Date().toLocaleString("th-TH");
+    // สร้าง String วันที่และเวลา ณ ปัจจุบันในรูปแบบ Local ไทย (เช่น 28/09/2569 13:13:35)
+    const now = new Date();
+    const d = String(now.getDate()).padStart(2, "0");
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const yBE = now.getFullYear() + 543;
+    const hh = String(now.getHours()).padStart(2, "0");
+    const mm = String(now.getMinutes()).padStart(2, "0");
+    const ss = String(now.getSeconds()).padStart(2, "0");
+
+    const formattedDateStr = `${d}/${m}/${yBE} ${hh}:${mm}:${ss}`;
     const txCategory = type === "income" ? "รายรับ" : category;
 
     setLoading(true);
 
     try {
       const formData = new FormData();
-      formData.append("date", dateStr);
+      formData.append("date", formattedDateStr);
       formData.append("type", type === "income" ? "รายรับ" : "รายจ่าย");
       formData.append("category", txCategory);
       formData.append("amount", amount);
@@ -155,7 +165,7 @@ export default function Home() {
     }
   };
 
-  // 📱 ระบบลาก Slide to Submit ที่ปรับปรุงให้ลื่นไหล
+  // 📱 ระบบลาก Slide to Submit
   const getMaxDrag = () => {
     if (!sliderTrackRef.current) return 0;
     const trackWidth = sliderTrackRef.current.clientWidth;
@@ -231,6 +241,83 @@ export default function Home() {
       return matchesSearch && matchesCategory;
     });
   }, [transactions, searchTerm, filterCategory]);
+
+  // 🛠️ ฟังก์ชันสกัดส่วนวันที่จาก String ของ Google Sheet
+  const extractDateOnly = (rawStr: string) => {
+    if (!rawStr) return "ไม่ระบุวันที่";
+    
+    // ตัดด้วยตัวคั่น T หรือ ช่องว่าง เพื่อเอาเฉพาะส่วนวันที่ด้านหน้า
+    const parts = rawStr.split(/[T\s]+/);
+    return parts[0].trim();
+  };
+
+  // ⏰ ฟังก์ชันสกัดส่วนเวลา (HH:mm) จาก String ของ Google Sheet ตรงๆ
+  const extractTimeOnly = (rawStr: string) => {
+    if (!rawStr) return "";
+
+    // 1. กรณีเป็น ISO รูปแบบ 2026-09-28T13:13:35.000Z
+    if (rawStr.includes("T")) {
+      const timePart = rawStr.split("T")[1];
+      if (timePart) {
+        const timeWithoutZ = timePart.replace("Z", "");
+        const [h, m] = timeWithoutZ.split(":");
+        if (h && m) return `${h.padStart(2, "0")}:${m.padStart(2, "0")} น.`;
+      }
+    }
+
+    // 2. กรณีเป็น String รูปแบบ "28/09/2569 13:13:35" หรือ "2026-09-28 13:13"
+    const match = rawStr.match(/(\d{1,2}):(\d{2})/);
+    if (match) {
+      const h = match[1].padStart(2, "0");
+      const m = match[2].padStart(2, "0");
+      return `${h}:${m} น.`;
+    }
+
+    return "";
+  };
+
+  // 📅 จัดกลุ่มรายการตาม String วันที่ที่ได้มาจาก Google Sheet
+  const groupedTransactions = useMemo(() => {
+    const groups: { [key: string]: { label: string; items: Transaction[] } } = {};
+
+    const now = new Date();
+    const day = String(now.getDate()).padStart(2, "0");
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const yearCE = now.getFullYear();
+    const yearBE = yearCE + 543;
+
+    // รูปแบบวันที่ของวันนี้ทุกประเภท เพื่อเทียบคำว่า "วันนี้"
+    const todayFormats = [
+      `${yearCE}-${month}-${day}`,
+      `${day}/${month}/${yearBE}`,
+      `${day}/${month}/${yearCE}`,
+      `${day}/${month}/${String(yearBE).slice(-2)}`,
+      `${day}/${month}/${String(yearCE).slice(-2)}`,
+    ];
+
+    filteredTransactions.forEach((tx) => {
+      const cleanDate = extractDateOnly(tx.date);
+      const isToday = todayFormats.includes(cleanDate);
+
+      const groupKey = cleanDate || "unknown";
+      let displayLabel = cleanDate;
+
+      if (isToday) {
+        displayLabel = `วันนี้ (${cleanDate})`;
+      }
+
+      if (!groups[groupKey]) {
+        groups[groupKey] = {
+          label: displayLabel,
+          items: [],
+        };
+      }
+
+      groups[groupKey].items.push(tx);
+    });
+
+    return groups;
+  }, [filteredTransactions]);
 
   const getCategoryImg = (cat: string) => {
     const found = CATEGORIES.find((c) => c.id === cat);
@@ -361,31 +448,33 @@ export default function Home() {
                   step="any"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
-                  className="w-full border border-gray-200 rounded-full py-3.5 pl-11 pr-5 focus:ring-2 focus:ring-zinc-900 outline-none bg-gray-50 text-gray-900 font-bold text-xl sm:text-2xl"
+                  className="w-full border border-gray-200 rounded-full py-3.5 pl-11 pr-5 focus:ring-2 focus:ring-zinc-900 outline-none bg-gray-50 text-gray-900 font-bold text-base sm:text-2xl"
                   placeholder="0.00"
                   required
                 />
               </div>
             </div>
 
+            {/* ช่องบันทึกช่วยจำ */}
             <div>
               <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">บันทึกช่วยจำ</label>
               <input
                 type="text"
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
-                className="w-full border border-gray-200 rounded-full px-5 py-3.5 focus:ring-2 focus:ring-zinc-900 outline-none bg-gray-50 text-gray-900 text-sm"
+                className="w-full border border-gray-200 rounded-full px-5 py-3.5 focus:ring-2 focus:ring-zinc-900 outline-none bg-gray-50 text-gray-900 text-base"
                 placeholder="เช่น ข้าวกะเพราหมูกรอบ, เติมบัตรแรบบิท"
               />
             </div>
 
+            {/* ช่องแนบไฟล์ */}
             <div>
               <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">แนบรูปภาพใบเสร็จ</label>
               <input
                 type="file"
                 accept="image/*"
                 onChange={(e) => setImageFile(e.target.files?.[0] || null)}
-                className="w-full border border-gray-200 rounded-full px-4 py-2 text-xs text-gray-500 bg-gray-50 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-zinc-900 file:text-white hover:file:bg-zinc-800"
+                className="w-full border border-gray-200 rounded-full px-4 py-2 text-base text-gray-500 bg-gray-50 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-zinc-900 file:text-white hover:file:bg-zinc-800"
               />
             </div>
 
@@ -438,12 +527,12 @@ export default function Home() {
                 placeholder="🔍 ค้นหา..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="flex-1 sm:flex-none border border-gray-200 rounded-full px-4 py-1.5 text-xs outline-none focus:ring-2 focus:ring-zinc-900 bg-gray-50"
+                className="flex-1 sm:flex-none border border-gray-200 rounded-full px-4 py-1.5 text-base outline-none focus:ring-2 focus:ring-zinc-900 bg-gray-50"
               />
               <select
                 value={filterCategory}
                 onChange={(e) => setFilterCategory(e.target.value)}
-                className="border border-gray-200 rounded-full px-4 py-1.5 text-xs outline-none focus:ring-2 focus:ring-zinc-900 bg-gray-50"
+                className="border border-gray-200 rounded-full px-4 py-1.5 text-base outline-none focus:ring-2 focus:ring-zinc-900 bg-gray-50"
               >
                 <option value="all">ทุกหมวดหมู่</option>
                 <option value="อาหาร">อาหาร</option>
@@ -463,57 +552,81 @@ export default function Home() {
                 <div key={n} className="h-16 bg-gray-100 animate-pulse rounded-2xl"></div>
               ))}
             </div>
-          ) : filteredTransactions.length === 0 ? (
+          ) : Object.keys(groupedTransactions).length === 0 ? (
             <p className="text-center text-gray-400 py-8 text-sm">ไม่พบรายการบันทึก</p>
           ) : (
-            <div className="space-y-3">
-              {filteredTransactions.map((tx) => (
-                <div key={tx.id} className="p-3.5 sm:p-4 rounded-2xl bg-gray-50 hover:bg-gray-100/80 transition flex items-center justify-between border border-gray-100">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-white shadow-sm flex items-center justify-center p-2 border border-gray-100 shrink-0">
-                      {tx.type === "income" ? (
-                        <span className="text-xl">💵</span>
-                      ) : (
-                        <div className="relative w-full h-full">
-                          <Image
-                            src={getCategoryImg(tx.category)}
-                            alt={tx.category}
-                            fill
-                            className="object-contain"
-                          />
-                        </div>
-                      )}
-                    </div>
-                    <div>
-                      <p className="font-bold text-gray-800 text-xs sm:text-sm">
-                        {tx.category} {tx.note && <span className="text-gray-500 font-normal">({tx.note})</span>}
-                      </p>
-                      <p className="text-[10px] sm:text-xs text-gray-400 mt-0.5">{tx.date}</p>
-                    </div>
-                  </div>
-                  
-                  <div className="text-right flex items-center gap-2.5 sm:gap-3">
-                    {tx.imageUrl ? (
-                      <button
-                        type="button"
-                        onClick={() => setSelectedImage(tx.imageUrl)}
-                        className="relative group focus:outline-none shrink-0"
-                        title="คลิกเพื่อดูรูปภาพขยายใหญ่"
-                      >
-                        <Image 
-                          src={tx.imageUrl} 
-                          alt="Receipt" 
-                          width={40} 
-                          height={40} 
-                          unoptimized
-                          className="rounded-xl object-cover h-10 w-10 sm:h-11 sm:w-11 border border-gray-200 group-hover:scale-105 transition shadow-sm" 
-                        />
-                      </button>
-                    ) : null}
-
-                    <span className={`font-extrabold text-sm sm:text-base whitespace-nowrap ${tx.type === "income" ? "text-green-600" : "text-red-500"}`}>
-                      {tx.type === "income" ? "+" : "-"}฿{tx.amount.toLocaleString()}
+            <div className="space-y-6">
+              {Object.entries(groupedTransactions).map(([dateKey, group]) => (
+                <div key={dateKey} className="space-y-3">
+                  {/* หัวข้อแสดงกลุ่มวันที่ */}
+                  <div className="flex items-center gap-2">
+                    <span className="bg-gray-100 text-gray-700 font-semibold px-3 py-1 rounded-full text-xs shadow-sm border border-gray-200">
+                      📅 {group.label}
                     </span>
+                    <div className="h-[1px] bg-gray-100 flex-1"></div>
+                  </div>
+
+                  {/* รายการใช้จ่ายในวันนั้นๆ */}
+                  <div className="space-y-3">
+                    {group.items.map((tx) => {
+                      const timeStr = extractTimeOnly(tx.date);
+
+                      return (
+                        <div key={tx.id} className="p-3.5 sm:p-4 rounded-2xl bg-gray-50 hover:bg-gray-100/80 transition flex items-center justify-between border border-gray-100">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-white shadow-sm flex items-center justify-center p-2 border border-gray-100 shrink-0">
+                              {tx.type === "income" ? (
+                                <span className="text-xl">💵</span>
+                              ) : (
+                                <div className="relative w-full h-full">
+                                  <Image
+                                    src={getCategoryImg(tx.category)}
+                                    alt={tx.category}
+                                    fill
+                                    className="object-contain"
+                                  />
+                                </div>
+                              )}
+                            </div>
+                            <div>
+                              <p className="font-bold text-gray-800 text-xs sm:text-sm">
+                                {tx.category} {tx.note && <span className="text-gray-500 font-normal">({tx.note})</span>}
+                              </p>
+                              {/* ⏰ เวลาที่โหลดและดึงตรงมาจาก Google Sheet */}
+                              {timeStr && (
+                                <p className="text-[11px] text-gray-400 mt-0.5 font-medium flex items-center gap-1">
+                                  <span>🕒</span> {timeStr}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          
+                          <div className="text-right flex items-center gap-2.5 sm:gap-3">
+                            {tx.imageUrl ? (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedImage(tx.imageUrl)}
+                                className="relative group focus:outline-none shrink-0"
+                                title="คลิกเพื่อดูรูปภาพขยายใหญ่"
+                              >
+                                <Image 
+                                  src={tx.imageUrl} 
+                                  alt="Receipt" 
+                                  width={40} 
+                                  height={40} 
+                                  unoptimized
+                                  className="rounded-xl object-cover h-10 w-10 sm:h-11 sm:w-11 border border-gray-200 group-hover:scale-105 transition shadow-sm" 
+                                />
+                              </button>
+                            ) : null}
+
+                            <span className={`font-extrabold text-sm sm:text-base whitespace-nowrap ${tx.type === "income" ? "text-green-600" : "text-red-500"}`}>
+                              {tx.type === "income" ? "+" : "-"}฿{tx.amount.toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               ))}
