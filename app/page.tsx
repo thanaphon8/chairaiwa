@@ -43,18 +43,40 @@ export default function Home() {
   const [type, setType] = useState<"income" | "expense">("expense");
   const [imageFile, setImageFile] = useState<File | null>(null);
   
+  // File Preview State (รูปตัวอย่างก่อนอัปโหลด)
+  const [filePreview, setFilePreview] = useState<string | null>(null);
+  
   // Loading State
   const [loading, setLoading] = useState<boolean>(false);
   const [initialLoading, setInitialLoading] = useState<boolean>(true);
 
-  // 🛷 Slide to Submit State & Ref
+  // Slide to Submit State & Ref
   const [sliderPosition, setSliderPosition] = useState<number>(0);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const sliderTrackRef = useRef<HTMLDivElement>(null);
   const dragStartXRef = useRef<number>(0);
   const animationFrameRef = useRef<number | null>(null);
 
-  // 🔄 1. ดึงข้อมูลจาก Google Sheet
+  // จัดการเมื่อมีการเลือกไฟล์รูปภาพ
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setImageFile(file);
+      const objectUrl = URL.createObjectURL(file);
+      setFilePreview(objectUrl);
+    }
+  };
+
+  // ยกเลิก/ลบรูปที่เลือกไว้
+  const handleRemoveFile = () => {
+    if (filePreview) {
+      URL.revokeObjectURL(filePreview);
+    }
+    setImageFile(null);
+    setFilePreview(null);
+  };
+
+  // 1. ดึงข้อมูลจาก Google Sheet
   const fetchTransactions = async () => {
     try {
       const res = await fetch('/api/transactions', { cache: 'no-store' });
@@ -70,7 +92,6 @@ export default function Home() {
             category: item.category || "-",
             note: item.note || "",
             imageUrl: item.imageUrl || item.image || item.fileUrl || null,
-            // รับค่า String วันที่และเวลาจาก Google Sheet โดยตรงแบบไม่ตัดแต่งหรือแปลง Date
             date: String(item.date || "").trim(),
           };
         });
@@ -101,7 +122,7 @@ export default function Home() {
     fetchTransactions();
   }, []);
 
-  // 📝 2. บันทึกข้อมูล
+  // 2. บันทึกข้อมูล
   const submitData = async () => {
     if (!amount || isNaN(Number(amount))) {
       alert("กรุณาระบุจำนวนเงินให้ถูกต้อง");
@@ -109,7 +130,6 @@ export default function Home() {
       return;
     }
 
-    // สร้างข้อความวันที่และเวลาไทยส่งไปบันทึก
     const now = new Date();
     const d = String(now.getDate()).padStart(2, "0");
     const m = String(now.getMonth() + 1).padStart(2, "0");
@@ -154,7 +174,7 @@ export default function Home() {
       // เคลียร์ฟอร์ม
       setAmount("");
       setNote("");
-      setImageFile(null);
+      handleRemoveFile();
 
     } catch (error) {
       console.error(error);
@@ -165,7 +185,7 @@ export default function Home() {
     }
   };
 
-  // 📱 ระบบลาก Slide to Submit
+  // ระบบลาก Slide to Submit
   const getMaxDrag = () => {
     if (!sliderTrackRef.current) return 0;
     const trackWidth = sliderTrackRef.current.clientWidth;
@@ -232,7 +252,7 @@ export default function Home() {
     };
   }, [isDragging, sliderPosition]);
 
-  // 🔍 กรองข้อมูลตามการค้นหาและหมวดหมู่
+  // กรองข้อมูลตามการค้นหาและหมวดหมู่
   const filteredTransactions = useMemo(() => {
     return transactions.filter((tx) => {
       const matchesSearch = tx.note.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -242,18 +262,15 @@ export default function Home() {
     });
   }, [transactions, searchTerm, filterCategory]);
 
-  // 🛠️ 1. สกัดวันที่จากข้อความ Sheet ตรงๆ (เอาส่วนแรกก่อนเว้นวรรค หรือคั่น T)
   const extractDateOnly = (rawStr: string) => {
     if (!rawStr) return "ไม่ระบุวันที่";
     const parts = rawStr.split(/[T\s]+/);
     return parts[0].trim();
   };
 
-  // ⏰ 2. สกัดเวลาจากข้อความ Sheet ตรงๆ (ค้นหาชุดตัวเลข HH:mm ที่ปรากฏในข้อความ)
   const extractTimeOnly = (rawStr: string) => {
     if (!rawStr) return "";
 
-    // ค้นหาแพตเทิร์นเวลา ตัวเลข 1-2 หลัก คั่นด้วย : และตัวเลข 2 หลัก (เช่น 13:30 หรือ 08:05)
     const timeMatch = rawStr.match(/(\d{1,2}):(\d{2})/);
     if (timeMatch) {
       const hours = timeMatch[1].padStart(2, "0");
@@ -264,7 +281,7 @@ export default function Home() {
     return "";
   };
 
-  // 📅 จัดกลุ่มรายการตาม String วันที่จาก Google Sheet
+  // จัดกลุ่มรายการตาม String วันที่จาก Google Sheet
   const groupedTransactions = useMemo(() => {
     const groups: { [key: string]: { label: string; items: Transaction[] } } = {};
 
@@ -274,7 +291,6 @@ export default function Home() {
     const yearCE = now.getFullYear();
     const yearBE = yearCE + 543;
 
-    // รูปแบบวันที่ของวันนี้ทุกประเภท เพื่อเทียบป้าย "วันนี้"
     const todayFormats = [
       `${yearCE}-${month}-${day}`,
       `${day}/${month}/${yearBE}`,
@@ -307,9 +323,9 @@ export default function Home() {
     return groups;
   }, [filteredTransactions]);
 
-  const getCategoryImg = (cat: string) => {
+  const getCategoryInfo = (cat: string) => {
     const found = CATEGORIES.find((c) => c.id === cat);
-    return found ? found.image : "/img/more.png";
+    return found ? found : { id: cat, label: cat, image: "/img/more.png" };
   };
 
   return (
@@ -321,7 +337,7 @@ export default function Home() {
           <div className="bg-zinc-900 text-white rounded-3xl p-6 sm:p-8 shadow-2xl">
             <div className="flex justify-between items-center mb-6">
               <div>
-                <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">💸 Chai Rai Wa</h1>
+                <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">Chai Rai Wa</h1>
                 <p className="text-zinc-400 text-xs sm:text-sm mt-1">บันทึกรายรับ-รายจ่ายง่ายๆ (จ่ายไรวะ)</p>
               </div>
             </div>
@@ -455,18 +471,48 @@ export default function Home() {
               />
             </div>
 
-            {/* ช่องแนบไฟล์ */}
+            {/* ช่องแนบไฟล์ + แสดงรูปตัวอย่างก่อนอัปโหลด */}
             <div>
-              <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">แนบรูปภาพใบเสร็จ</label>
+              <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                แนบรูปภาพใบเสร็จ
+              </label>
+              
               <input
                 type="file"
                 accept="image/*"
-                onChange={(e) => setImageFile(e.target.files?.[0] || null)}
+                onChange={handleFileChange}
                 className="w-full border border-gray-200 rounded-full px-4 py-2 text-base text-gray-500 bg-gray-50 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-zinc-900 file:text-white hover:file:bg-zinc-800"
               />
+
+              {/* ส่วนแสดงภาพตัวอย่าง (Preview) */}
+              {filePreview && (
+                <div className="mt-3 relative inline-block">
+                  <div className="relative w-32 h-32 rounded-2xl overflow-hidden border-2 border-zinc-900 shadow-md bg-gray-100">
+                    <Image
+                      src={filePreview}
+                      alt="Preview"
+                      fill
+                      unoptimized
+                      className="object-cover"
+                    />
+                  </div>
+                  {/* ปุ่มกดลบรูปภาพ */}
+                  <button
+                    type="button"
+                    onClick={handleRemoveFile}
+                    className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shadow-md transition"
+                    title="ลบรูปภาพนี้"
+                  >
+                    ✕
+                  </button>
+                  <p className="text-[11px] text-gray-500 mt-1 font-medium text-center">
+                    รูปที่เลือกแล้ว
+                  </p>
+                </div>
+              )}
             </div>
 
-            {/* 🛷 ปุ่ม Slide to Submit */}
+            {/* ปุ่ม Slide to Submit */}
             <div className="pt-2">
               <div
                 ref={sliderTrackRef}
@@ -512,7 +558,7 @@ export default function Home() {
             <div className="flex flex-wrap gap-2">
               <input
                 type="text"
-                placeholder="🔍 ค้นหา..."
+                placeholder="ค้นหา..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="flex-1 sm:flex-none border border-gray-200 rounded-full px-4 py-1.5 text-base outline-none focus:ring-2 focus:ring-zinc-900 bg-gray-50"
@@ -537,7 +583,7 @@ export default function Home() {
           {initialLoading ? (
             <div className="space-y-3">
               {[1, 2, 3].map((n) => (
-                <div key={n} className="h-16 bg-gray-100 animate-pulse rounded-2xl"></div>
+                <div key={n} className="h-28 bg-gray-100 animate-pulse rounded-3xl"></div>
               ))}
             </div>
           ) : Object.keys(groupedTransactions).length === 0 ? (
@@ -549,7 +595,7 @@ export default function Home() {
                   {/* หัวข้อแสดงกลุ่มวันที่ */}
                   <div className="flex items-center gap-2">
                     <span className="bg-gray-100 text-gray-700 font-semibold px-3 py-1 rounded-full text-xs shadow-sm border border-gray-200">
-                      📅 {group.label}
+                      {group.label}
                     </span>
                     <div className="h-[1px] bg-gray-100 flex-1"></div>
                   </div>
@@ -558,59 +604,76 @@ export default function Home() {
                   <div className="space-y-3">
                     {group.items.map((tx) => {
                       const timeStr = extractTimeOnly(tx.date);
+                      const catInfo = getCategoryInfo(tx.category);
+                      const isIncome = tx.type === "income";
+                      const titleText = tx.note.trim() ? tx.note : tx.category;
 
                       return (
-                        <div key={tx.id} className="p-3.5 sm:p-4 rounded-2xl bg-gray-50 hover:bg-gray-100/80 transition flex items-center justify-between border border-gray-100">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-white shadow-sm flex items-center justify-center p-2 border border-gray-100 shrink-0">
-                              {tx.type === "income" ? (
-                                <span className="text-xl">💵</span>
-                              ) : (
-                                <div className="relative w-full h-full">
-                                  <Image
-                                    src={getCategoryImg(tx.category)}
-                                    alt={tx.category}
-                                    fill
-                                    className="object-contain"
-                                  />
-                                </div>
-                              )}
-                            </div>
-                            <div>
-                              <p className="font-bold text-gray-800 text-xs sm:text-sm">
-                                {tx.category} {tx.note && <span className="text-gray-500 font-normal">({tx.note})</span>}
-                              </p>
-                              {/* ⏰ เวลาที่ดึงจากตัวเลขข้อความบน Sheet โดยตรง */}
-                              {timeStr && (
-                                <p className="text-[11px] text-gray-400 mt-0.5 font-medium flex items-center gap-1">
-                                  <span>🕒</span> {timeStr}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                          
-                          <div className="text-right flex items-center gap-2.5 sm:gap-3">
+                        <div 
+                          key={tx.id} 
+                          className={`relative overflow-hidden rounded-[28px] p-3 sm:p-4 flex justify-between items-center transition shadow-sm ${
+                            isIncome ? "bg-emerald-50/80" : "bg-red-50/80"
+                          }`}
+                        >
+                          {/* ฝั่งซ้าย: รูปภาพแนบ (ถ้ามี) + ข้อความรายละเอียด */}
+                          <div className="flex items-center gap-3 sm:gap-4 flex-1 pr-2 min-w-0">
                             {tx.imageUrl ? (
                               <button
                                 type="button"
                                 onClick={() => setSelectedImage(tx.imageUrl)}
-                                className="relative group focus:outline-none shrink-0"
-                                title="คลิกเพื่อดูรูปภาพขยายใหญ่"
+                                className="relative shrink-0 w-24 h-24 sm:w-28 sm:h-28 rounded-2xl overflow-hidden group focus:outline-none shadow-sm"
+                                title="คลิกเพื่อดูรูปใหญ่"
                               >
-                                <Image 
-                                  src={tx.imageUrl} 
-                                  alt="Receipt" 
-                                  width={40} 
-                                  height={40} 
+                                <Image
+                                  src={tx.imageUrl}
+                                  alt="Receipt"
+                                  fill
                                   unoptimized
-                                  className="rounded-xl object-cover h-10 w-10 sm:h-11 sm:w-11 border border-gray-200 group-hover:scale-105 transition shadow-sm" 
+                                  className="object-cover group-hover:scale-105 transition-transform duration-200"
                                 />
                               </button>
                             ) : null}
 
-                            <span className={`font-extrabold text-sm sm:text-base whitespace-nowrap ${tx.type === "income" ? "text-green-600" : "text-red-500"}`}>
-                              {tx.type === "income" ? "+" : "-"}฿{tx.amount.toLocaleString()}
-                            </span>
+                            <div className="flex flex-col justify-center space-y-1 py-1">
+                              {/* ชื่อรายการ */}
+                              <h4 className="font-extrabold text-gray-900 text-base sm:text-xl tracking-tight line-clamp-1">
+                                {titleText}
+                              </h4>
+
+                              {/* เวลา */}
+                              {timeStr && (
+                                <p className="text-gray-400 text-xs sm:text-sm font-medium">
+                                  {timeStr}
+                                </p>
+                              )}
+
+                              {/* จำนวนเงิน */}
+                              <p className={`font-black text-xl sm:text-2xl pt-1 ${
+                                isIncome ? "text-emerald-600" : "text-red-600"
+                              }`}>
+                                {isIncome ? "+" : "-"}฿{tx.amount.toLocaleString()}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* ฝั่งขวา: ไอคอนหมวดหมู่ + ป้ายหมวดหมู่สีขาว */}
+                          <div className="flex flex-col items-end justify-between h-24 sm:h-28 shrink-0 pl-2">
+                            {/* ไอคอนหมวดหมู่ */}
+                            <div className="relative w-12 h-12 sm:w-16 sm:h-16">
+                              <Image
+                                src={isIncome ? "/img/more.png" : catInfo.image}
+                                alt={catInfo.label}
+                                fill
+                                className="object-contain"
+                              />
+                            </div>
+
+                            {/* ป้ายหมวดหมู่ทรงแคปซูลสีขาว */}
+                            <div className="bg-white px-3 sm:px-4 py-1 sm:py-1.5 rounded-full shadow-sm border border-gray-100/60">
+                              <span className="text-xs sm:text-sm font-bold text-gray-800 whitespace-nowrap">
+                                {isIncome ? "รายรับ" : catInfo.label}
+                              </span>
+                            </div>
                           </div>
                         </div>
                       );
