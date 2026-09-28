@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import DashboardCard from "./components/DashboardCard";
+import DaysRemainingCard from "./components/DaysRemainingCard";
 import AddTransactionForm from "./components/AddTransactionForm";
 import TransactionHistory, { Transaction } from "./components/TransactionHistory";
 
@@ -77,6 +78,12 @@ export default function Home() {
           balance={balance}
           totalIncome={totalIncome}
           totalExpense={totalExpense}
+        />
+
+        {/* ส่วนคาดการณ์จำนวนวันที่ใช้เงินได้ */}
+        <DaysRemainingCard
+          balance={balance}
+          transactions={transactions}
         />
 
         {/* ส่วนที่ 2: ฟอร์มเพิ่มรายการใหม่ */}
