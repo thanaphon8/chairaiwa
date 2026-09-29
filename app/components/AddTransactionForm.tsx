@@ -11,7 +11,7 @@ type CategoryOption = {
 
 type AddTransactionFormProps = {
   categories: CategoryOption[];
-  onSuccess: () => Promise<void>;
+  onSuccess: () => void | Promise<void>; // 👈 ปรับจุดนี้ให้รองรับทั้ง void และ Promise<void>
 };
 
 export default function AddTransactionForm({
@@ -289,7 +289,7 @@ export default function AddTransactionForm({
               inputMode="decimal"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              onWheel={(e) => e.currentTarget.blur()} /* 👈 ป้องกันการหมุนลูกกลิ้งเมาส์แล้วเพิ่ม-ลดตัวเลข */
+              onWheel={(e) => e.currentTarget.blur()}
               className="w-full border border-gray-200 rounded-full py-3.5 pl-11 pr-5 focus:ring-2 focus:ring-zinc-900 outline-none bg-gray-50 text-gray-900 font-bold text-base sm:text-2xl [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
               placeholder="0.00"
               required

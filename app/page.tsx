@@ -22,6 +22,18 @@ export default function Home() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [initialLoading, setInitialLoading] = useState<boolean>(true);
 
+  // ฟังก์ชันเล่นเสียงเมื่อบันทึกสำเร็จ
+  const playSuccessSound = () => {
+    try {
+      const audio = new Audio("/sound/shine.mp3");
+      audio.play().catch((err) => {
+        console.log("Audio play blocked/failed:", err);
+      });
+    } catch (error) {
+      console.error("Error playing sound:", error);
+    }
+  };
+
   // ดึงข้อมูลจาก Google Sheet
   const fetchTransactions = async () => {
     try {
@@ -66,6 +78,12 @@ export default function Home() {
     }
   };
 
+  // ฟังก์ชันทำงานหลังบันทึกสำเร็จ (ดึงข้อมูลใหม่ + เล่นเสียง)
+  const handleSuccess = () => {
+    playSuccessSound();
+    fetchTransactions();
+  };
+
   useEffect(() => {
     fetchTransactions();
   }, []);
@@ -89,7 +107,7 @@ export default function Home() {
         {/* ส่วนที่ 2: ฟอร์มเพิ่มรายการใหม่ */}
         <AddTransactionForm
           categories={CATEGORIES}
-          onSuccess={fetchTransactions}
+          onSuccess={handleSuccess}
         />
 
         {/* ส่วนที่ 3: ประวัติการใช้จ่าย */}
