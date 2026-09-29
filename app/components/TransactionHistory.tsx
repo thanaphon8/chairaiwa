@@ -25,6 +25,13 @@ type TransactionHistoryProps = {
   categories: CategoryOption[];
 };
 
+type GroupSummary = {
+  label: string;
+  items: Transaction[];
+  totalDailyIncome: number;
+  totalDailyExpense: number;
+};
+
 export default function TransactionHistory({
   transactions,
   initialLoading,
@@ -68,9 +75,9 @@ export default function TransactionHistory({
     });
   }, [transactions, searchTerm, filterCategory]);
 
-  // Grouping
+  // Grouping + Calculate Daily Summary
   const groupedTransactions = useMemo(() => {
-    const groups: { [key: string]: { label: string; items: Transaction[] } } = {};
+    const groups: { [key: string]: GroupSummary } = {};
 
     const now = new Date();
     const day = String(now.getDate()).padStart(2, "0");
@@ -101,10 +108,19 @@ export default function TransactionHistory({
         groups[groupKey] = {
           label: displayLabel,
           items: [],
+          totalDailyIncome: 0,
+          totalDailyExpense: 0,
         };
       }
 
       groups[groupKey].items.push(tx);
+
+      // คำนวณยอดรวมรายวัน
+      if (tx.type === "income") {
+        groups[groupKey].totalDailyIncome += tx.amount;
+      } else {
+        groups[groupKey].totalDailyExpense += tx.amount;
+      }
     });
 
     return groups;
@@ -159,13 +175,27 @@ export default function TransactionHistory({
         <div className="space-y-6">
           {Object.entries(groupedTransactions).map(([dateKey, group]) => (
             <div key={dateKey} className="space-y-3">
-              <div className="flex items-center gap-2">
+              {/* หัวข้อวันที่ + สรุปยอดรวมประจำวัน */}
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2">
                 <span className="bg-gray-100 text-gray-700 font-semibold px-3 py-1 rounded-full text-xs shadow-sm border border-gray-200">
                   {group.label}
                 </span>
-                <div className="h-[1px] bg-gray-100 flex-1"></div>
+
+                <div className="flex items-center gap-3 text-xs sm:text-sm font-bold">
+                  {group.totalDailyIncome > 0 && (
+                    <span className="text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-md border border-emerald-100">
+                      +฿{group.totalDailyIncome.toLocaleString()}
+                    </span>
+                  )}
+                  {group.totalDailyExpense > 0 && (
+                    <span className="text-red-500 bg-red-50 px-2.5 py-0.5 rounded-md border border-red-100">
+                      -฿{group.totalDailyExpense.toLocaleString()}
+                    </span>
+                  )}
+                </div>
               </div>
 
+              {/* รายการธุรกรรมย่อยในวันนั้น */}
               <div className="space-y-3">
                 {group.items.map((tx) => {
                   const timeStr = extractTimeOnly(tx.date);
