@@ -63,7 +63,7 @@ export default function TransactionHistory({
 
   const getCategoryInfo = (cat: string) => {
     const found = categories.find((c) => c.id === cat);
-    return found ? found : { id: cat, label: cat, image: "/img/more.png" };
+    return found ? found : { id: cat, label: cat, image: "/img/income.png" };
   };
 
   // ล็อกไม่ให้พื้นหลัง Scroll เมื่อเปิด Modal
@@ -158,7 +158,7 @@ export default function TransactionHistory({
   };
 
   return (
-    <div className="bg-white -mx-4 sm:mx-0 -mb-4 sm:mb-0 p-5 pb-10 sm:p-8 rounded-none sm:rounded-3xl shadow-none sm:shadow-sm border-none sm:border sm:border-gray-100 transition-all min-h-[calc(100vh-100px)] sm:min-h-0">
+    <div className="bg-white rounded-none sm:rounded-3xl p-5 sm:p-8 shadow-sm border-y sm:border border-gray-100">
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
         <div>
           <h3 className="text-lg sm:text-xl font-bold text-gray-800">
@@ -286,9 +286,10 @@ export default function TransactionHistory({
                       <div className="flex flex-col items-end justify-between h-24 sm:h-28 shrink-0 pl-2">
                         <div className="relative w-12 h-12 sm:w-16 sm:h-16">
                           <Image
-                            src={isIncome ? "/img/more.png" : catInfo.image}
+                            src={isIncome ? "/img/income.png" : catInfo.image}
                             alt={catInfo.label}
                             fill
+                            sizes="(max-width: 640px) 48px, 64px"
                             className="object-contain"
                           />
                         </div>

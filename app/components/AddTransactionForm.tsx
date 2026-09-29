@@ -262,29 +262,78 @@ export default function AddTransactionForm({
       </h3>
 
       <div className="space-y-5">
-        {/* สลับ รายรับ / รายจ่าย */}
-        <div className="flex p-1 bg-gray-100 sm:bg-gray-100 rounded-full gap-1">
+        {/* สลับ รายจ่าย / รายรับ (สไตล์เดียวกับหมวดหมู่) */}
+        <div className="grid grid-cols-2 gap-4">
+          {/* ปุ่ม รายจ่าย */}
           <button
             type="button"
             onClick={() => setType("expense")}
-            className={`flex-1 py-3 rounded-full font-semibold text-sm transition-all ${
-              type === "expense"
-                ? "bg-red-500 text-white shadow-md"
-                : "text-gray-500 hover:text-gray-800"
-            }`}
+            className="flex flex-col items-center justify-center group focus:outline-none"
           >
-            รายจ่าย (-)
+            <div
+              className={`relative w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center transition-all duration-200 ${
+                type === "expense"
+                  ? "scale-110 drop-shadow-md"
+                  : "opacity-60 hover:opacity-100 hover:scale-105"
+              }`}
+            >
+              <Image
+                src="/img/pay.png"
+                alt="รายจ่าย"
+                fill
+                className="object-contain p-1"
+              />
+
+              {type === "expense" && (
+                <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-zinc-900 text-white flex items-center justify-center text-[11px] font-bold shadow-md border-2 border-white">
+                  ✓
+                </span>
+              )}
+            </div>
+
+            <span
+              className={`text-xs mt-2 text-center font-medium transition-colors ${
+                type === "expense" ? "text-zinc-900 font-bold" : "text-gray-500"
+              }`}
+            >
+              รายจ่าย (-)
+            </span>
           </button>
+
+          {/* ปุ่ม รายรับ */}
           <button
             type="button"
             onClick={() => setType("income")}
-            className={`flex-1 py-3 rounded-full font-semibold text-sm transition-all ${
-              type === "income"
-                ? "bg-green-500 text-white shadow-md"
-                : "text-gray-500 hover:text-gray-800"
-            }`}
+            className="flex flex-col items-center justify-center group focus:outline-none"
           >
-            รายรับ (+)
+            <div
+              className={`relative w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center transition-all duration-200 ${
+                type === "income"
+                  ? "scale-110 drop-shadow-md"
+                  : "opacity-60 hover:opacity-100 hover:scale-105"
+              }`}
+            >
+              <Image
+                src="/img/income.png"
+                alt="รายรับ"
+                fill
+                className="object-contain p-1"
+              />
+
+              {type === "income" && (
+                <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-zinc-900 text-white flex items-center justify-center text-[11px] font-bold shadow-md border-2 border-white">
+                  ✓
+                </span>
+              )}
+            </div>
+
+            <span
+              className={`text-xs mt-2 text-center font-medium transition-colors ${
+                type === "income" ? "text-zinc-900 font-bold" : "text-gray-500"
+              }`}
+            >
+              รายรับ (+)
+            </span>
           </button>
         </div>
 
