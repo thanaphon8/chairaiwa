@@ -158,7 +158,7 @@ export default function TransactionHistory({
   };
 
   return (
-    <div className="bg-white rounded-none sm:rounded-3xl p-5 sm:p-8 shadow-sm border-y sm:border border-gray-100">
+    <div className="bg-white -mx-4 sm:mx-0 -mb-4 sm:mb-0 p-5 pb-10 sm:p-8 rounded-none sm:rounded-3xl shadow-none sm:shadow-sm border-none sm:border sm:border-gray-100 transition-all min-h-[calc(100vh-100px)] sm:min-h-0">
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
         <div>
           <h3 className="text-lg sm:text-xl font-bold text-gray-800">
@@ -349,13 +349,12 @@ export default function TransactionHistory({
         </div>
       )}
 
-      {/* Modal ดูรูปภาพขนาดใหญ่ (ปุ่ม X อยู่มุมขวาบนของหน้าจอ ไม่ทับรูป) */}
+      {/* Modal ดูรูปภาพขนาดใหญ่ */}
       {selectedImage && (
         <div
           className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-6 sm:p-12"
           onClick={() => setSelectedImage(null)}
         >
-          {/* ปุ่มปิด (X) ลอยอยู่นอกพื้นที่รูปภาพ (มุมขวาบนหน้าจอ) */}
           <button
             type="button"
             onClick={() => setSelectedImage(null)}
@@ -365,7 +364,6 @@ export default function TransactionHistory({
             ✕
           </button>
 
-          {/* Container รูปภาพหลัก */}
           <div
             className="relative w-full max-w-3xl h-[80vh] flex items-center justify-center"
             onClick={(e) => e.stopPropagation()}

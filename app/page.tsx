@@ -89,33 +89,39 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-100 text-gray-900 font-sans p-0 sm:p-8 select-none">
-      <main className="w-full max-w-3xl mx-auto space-y-4 sm:space-y-6">
-        {/* ส่วนที่ 1: แสดงสรุปยอดเงิน/รายรับ-รายจ่าย */}
-        <DashboardCard
-          balance={balance}
-          totalIncome={totalIncome}
-          totalExpense={totalExpense}
-        />
+    <div className="min-h-screen bg-gray-100 text-gray-900 font-sans p-0 select-none">
+      <main className="w-full">
+        {/* กลุ่มการ์ดสรุปยอดเงินแนบชิดกัน เต็มจอ ไร้ขอบโค้งมน */}
+        <div className="w-full space-y-0">
+          {/* ส่วนที่ 1: แสดงสรุปยอดเงิน/รายรับ-รายจ่าย */}
+          <DashboardCard
+            balance={balance}
+            totalIncome={totalIncome}
+            totalExpense={totalExpense}
+          />
 
-        {/* ส่วนคาดการณ์จำนวนวันที่ใช้เงินได้ */}
-        <DaysRemainingCard
-          balance={balance}
-          transactions={transactions}
-        />
+          {/* ส่วนคาดการณ์จำนวนวันที่ใช้เงินได้ */}
+          <DaysRemainingCard
+            balance={balance}
+            transactions={transactions}
+          />
+        </div>
 
-        {/* ส่วนที่ 2: ฟอร์มเพิ่มรายการใหม่ */}
-        <AddTransactionForm
-          categories={CATEGORIES}
-          onSuccess={handleSuccess}
-        />
+        {/* ส่วนฟอร์มและประวัติการใช้จ่าย */}
+        <div className="w-full mt-4 sm:mt-6 space-y-4 sm:space-y-6 px-4 sm:px-8 pb-8">
+          {/* ส่วนที่ 2: ฟอร์มเพิ่มรายการใหม่ */}
+          <AddTransactionForm
+            categories={CATEGORIES}
+            onSuccess={handleSuccess}
+          />
 
-        {/* ส่วนที่ 3: ประวัติการใช้จ่าย */}
-        <TransactionHistory
-          transactions={transactions}
-          initialLoading={initialLoading}
-          categories={CATEGORIES}
-        />
+          {/* ส่วนที่ 3: ประวัติการใช้จ่าย */}
+          <TransactionHistory
+            transactions={transactions}
+            initialLoading={initialLoading}
+            categories={CATEGORIES}
+          />
+        </div>
       </main>
     </div>
   );

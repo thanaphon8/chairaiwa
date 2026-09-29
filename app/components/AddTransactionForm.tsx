@@ -11,7 +11,62 @@ type CategoryOption = {
 
 type AddTransactionFormProps = {
   categories: CategoryOption[];
-  onSuccess: () => void | Promise<void>; // 👈 ปรับจุดนี้ให้รองรับทั้ง void และ Promise<void>
+  onSuccess: () => void | Promise<void>;
+};
+
+// 📌 พรีเซตคำสำหรับแต่ละหมวดหมู่
+const PRESETS_BY_CATEGORY: Record<string, string[]> = {
+  อาหาร: [
+    "กะเพราหมูกรอบ",
+    "ข้าวมันไก่",
+    "ก๋วยเตี๋ยว",
+    "ข้าวไข่เจียว",
+    "กาแฟสด",
+    "ชาไทย",
+    "หมูกระทะ",
+    "ของกิน 7-Eleven",
+  ],
+  เดินทาง: [
+    "ไปทำงาน",
+    "กลับบ้าน",
+    "ค่าน้ำมัน",
+    "ค่าทางด่วน",
+    "เติมบัตร BTS/MRT",
+    "ค่า Grab/Bolt",
+    "ค่าวินมอเตอร์ไซค์",
+    "ค่าจอดรถ",
+  ],
+  ช้อปปิ้ง: [
+    "เสื้อผ้า",
+    "รองเท้า",
+    "ของใช้ในบ้าน",
+    "เครื่องสำอาง",
+    "ของ Shopee/Lazada",
+    "หนังสือ",
+  ],
+  ที่พัก: [
+    "ค่าเช่าห้อง",
+    "ค่าน้ำ",
+    "ค่าไฟ",
+    "ค่าส่วนกลาง",
+    "ค่าแก๊ส",
+  ],
+  ความบันเทิง: [
+    "ค่าอินเทอร์เน็ต",
+    "ตั๋วหนัง",
+    "เติมเกม",
+    "Netflix / Spotify",
+    "สังสรรค์ / ปาร์ตี้",
+    "คอนเสิร์ต",
+    "บอร์ดเกม",
+  ],
+  อื่นๆ: [
+    "ทำบุญ / บริจาค",
+    "ซื้อของให้พ่อแม่",
+    "ค่ารักษาพยาบาล",
+    "ค่ายา",
+    "ฝากธนาคาร",
+  ],
 };
 
 export default function AddTransactionForm({
@@ -25,6 +80,9 @@ export default function AddTransactionForm({
   const [type, setType] = useState<"income" | "expense">("expense");
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [filePreview, setFilePreview] = useState<string | null>(null);
+
+  // State สำหรับควบคุมการแสดงผล Quick Presets
+  const [showNotePresets, setShowNotePresets] = useState<boolean>(false);
 
   // Loading State
   const [loading, setLoading] = useState<boolean>(false);
@@ -113,6 +171,7 @@ export default function AddTransactionForm({
       // Clear Form
       setAmount("");
       setNote("");
+      setShowNotePresets(false);
       handleRemoveFile();
     } catch (error) {
       console.error(error);
@@ -190,15 +249,21 @@ export default function AddTransactionForm({
     };
   }, [isDragging, sliderPosition]);
 
+  // พรีเซตของหมวดหมู่ที่เลือกอยู่ปัจจุบัน
+  const activePresets =
+    type === "expense"
+      ? PRESETS_BY_CATEGORY[category] || []
+      : ["เงินเดือน", "โบนัส", "ขายของ", "ได้รับคืน", "ดอกเบี้ย", "อื่นๆ"];
+
   return (
-    <div className="bg-white rounded-none sm:rounded-3xl p-5 sm:p-8 shadow-sm border-y sm:border border-gray-100">
+    <div className="w-full bg-transparent p-0 shadow-none border-none rounded-none sm:bg-white sm:p-8 sm:rounded-3xl sm:shadow-sm sm:border sm:border-gray-100 transition-all">
       <h3 className="text-lg sm:text-xl font-bold mb-4 sm:mb-5 text-gray-800">
         เพิ่มรายการใหม่
       </h3>
 
       <div className="space-y-5">
         {/* สลับ รายรับ / รายจ่าย */}
-        <div className="flex p-1 bg-gray-100 rounded-full gap-1">
+        <div className="flex p-1 bg-gray-100 sm:bg-gray-100 rounded-full gap-1">
           <button
             type="button"
             onClick={() => setType("expense")}
@@ -274,15 +339,25 @@ export default function AddTransactionForm({
           </div>
         )}
 
-        {/* จำนวนเงิน */}
+        {/* จำนวนเงิน - ดีไซน์กระเป๋าสตางค์สีน้ำตาลเข้ม */}
         <div>
           <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
             จำนวนเงิน
           </label>
-          <div className="relative flex items-center">
-            <span className="absolute left-5 text-xl font-extrabold text-gray-400 select-none">
-              ฿
-            </span>
+          <div className="relative flex items-center group">
+            {/* ไอคอนกระเป๋าสตางค์หนังสีน้ำตาลเข้ม */}
+            <div className="absolute left-3.5 z-10 flex items-center justify-center w-10 h-10 bg-[#4A2E1F] rounded-2xl shadow-md border border-[#362115] transition-transform duration-200 group-hover:scale-105">
+              <svg
+                className="w-5 h-5 text-[#E0C097]"
+                fill="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path d="M21 7H3c-1.1 0-2 .9-2 2v9c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2zm0 11H3V9h18v9zM20 5H4V3h16v2z" />
+                <path d="M16 12h3v3h-3z" />
+              </svg>
+            </div>
+
+            {/* ช่องกรอกจำนวนเงิน */}
             <input
               type="number"
               step="any"
@@ -290,25 +365,72 @@ export default function AddTransactionForm({
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               onWheel={(e) => e.currentTarget.blur()}
-              className="w-full border border-gray-200 rounded-full py-3.5 pl-11 pr-5 focus:ring-2 focus:ring-zinc-900 outline-none bg-gray-50 text-gray-900 font-bold text-base sm:text-2xl [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              className="w-full border-2 border-[#5C3D2E]/20 focus:border-[#4A2E1F] rounded-full py-3.5 pl-16 pr-6 outline-none bg-amber-50/30 text-[#2C1810] font-bold text-lg sm:text-2xl transition-all shadow-inner [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none placeholder:text-gray-400 focus:bg-white"
               placeholder="0.00"
               required
             />
+
+            {/* ข้อความหน่วยเงิน */}
+            <span className="absolute right-5 text-sm font-bold text-[#5C3D2E]/60 pointer-events-none">
+              THB (฿)
+            </span>
           </div>
         </div>
 
-        {/* บันทึกช่วยจำ */}
+        {/* บันทึกช่วยจำ + Quick Presets */}
         <div>
-          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-            บันทึกช่วยจำ
-          </label>
+          <div className="flex justify-between items-center mb-2">
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">
+              บันทึกช่วยจำ
+            </label>
+            <button
+              type="button"
+              onClick={() => setShowNotePresets((prev) => !prev)}
+              className="text-xs font-semibold text-zinc-600 hover:text-zinc-900 underline transition-colors"
+            >
+              {showNotePresets ? "ซ่อนตัวเลือกด่วน" : "⚡ ตัวเลือกด่วน"}
+            </button>
+          </div>
+
           <input
             type="text"
             value={note}
+            onFocus={() => setShowNotePresets(true)}
             onChange={(e) => setNote(e.target.value)}
             className="w-full border border-gray-200 rounded-full px-5 py-3.5 focus:ring-2 focus:ring-zinc-900 outline-none bg-gray-50 text-gray-900 text-base"
             placeholder="เช่น ข้าวกะเพราหมูกรอบ, เติมบัตรแรบบิท"
           />
+
+          {/* Quick Presets Animation */}
+          <div
+            className={`grid transition-all duration-300 ease-out overflow-hidden ${
+              showNotePresets && activePresets.length > 0
+                ? "grid-rows-[1fr] opacity-100 mt-3"
+                : "grid-rows-[0fr] opacity-0 mt-0"
+            }`}
+          >
+            <div className="min-h-0 transition-all duration-300 transform">
+              <div className="flex flex-wrap gap-1.5 p-3 bg-white sm:bg-gray-50 border border-gray-200 rounded-2xl shadow-inner">
+                {activePresets.map((preset) => {
+                  const isSelected = note === preset;
+                  return (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setNote(preset)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200 ${
+                        isSelected
+                          ? "bg-zinc-900 text-white shadow-sm scale-105"
+                          : "bg-gray-100 sm:bg-white text-gray-700 border border-gray-200 hover:bg-gray-200 hover:border-gray-300 active:scale-95"
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* แนบรูปภาพใบเสร็จ */}
@@ -329,7 +451,7 @@ export default function AddTransactionForm({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="w-full flex items-center justify-center gap-2 border border-dashed border-gray-300 hover:border-zinc-900 rounded-2xl py-3.5 px-4 text-sm font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 transition"
+              className="w-full flex items-center justify-center gap-2 border border-dashed border-gray-300 hover:border-zinc-900 rounded-2xl py-3.5 px-4 text-sm font-medium text-gray-600 bg-white sm:bg-gray-50 hover:bg-gray-100 transition"
             >
               <svg
                 className="w-5 h-5 text-gray-500"
