@@ -35,21 +35,23 @@ type GroupSummary = {
 const ITEMS_PER_PAGE = 10;
 
 export default function TransactionHistory({
-  transactions,
-  initialLoading,
-  categories,
+  transactions = [],
+  initialLoading = false,
+  categories = [],
 }: TransactionHistoryProps) {
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [filterCategory, setFilterCategory] = useState<string>("all");
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState<number>(1);
 
+  // สกัดเอาเฉพาะส่วนของวันที่
   const extractDateOnly = (rawStr: string) => {
     if (!rawStr) return "ไม่ระบุวันที่";
     const parts = rawStr.split(/[T\s]+/);
     return parts[0].trim();
   };
 
+  // สกัดเอาเฉพาะส่วนเวลา
   const extractTimeOnly = (rawStr: string) => {
     if (!rawStr) return "";
     const timeMatch = rawStr.match(/(\d{1,2}):(\d{2})/);
@@ -61,25 +63,34 @@ export default function TransactionHistory({
     return "";
   };
 
+  // ดึงข้อมูลหมวดหมู่
   const getCategoryInfo = (cat: string) => {
-    const found = categories.find((c) => c.id === cat);
+    const found = categories.find((c) => c.id === cat || c.label === cat);
     return found ? found : { id: cat, label: cat, image: "/img/income.png" };
   };
 
-  // ล็อกไม่ให้พื้นหลัง Scroll เมื่อเปิด Modal
+  // ล็อกไม่ให้พื้นหลัง Scroll และรองรับปุ่ม Esc เมื่อเปิด Modal
   useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSelectedImage(null);
+      }
+    };
+
     if (selectedImage) {
       document.body.style.overflow = "hidden";
+      window.addEventListener("keydown", handleKeyDown);
     } else {
       document.body.style.overflow = "unset";
     }
 
     return () => {
       document.body.style.overflow = "unset";
+      window.removeEventListener("keydown", handleKeyDown);
     };
   }, [selectedImage]);
 
-  // Filter รายการ
+  // กรองรายการ
   const filteredTransactions = useMemo(() => {
     return transactions.filter((tx) => {
       const matchesSearch =
@@ -93,15 +104,18 @@ export default function TransactionHistory({
 
   const totalPages = Math.ceil(filteredTransactions.length / ITEMS_PER_PAGE);
 
+  // รีเซ็ตกลับไปหน้า 1 เมื่อมีการค้นหาหรือเปลี่ยนตัวกรอง
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, filterCategory]);
 
+  // แบ่งหน้า
   const paginatedTransactions = useMemo(() => {
     const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
     return filteredTransactions.slice(startIndex, startIndex + ITEMS_PER_PAGE);
   }, [filteredTransactions, currentPage]);
 
+  // จัดกลุ่มตามวันที่
   const groupedTransactions = useMemo(() => {
     const groups: { [key: string]: GroupSummary } = {};
 
@@ -158,7 +172,8 @@ export default function TransactionHistory({
   };
 
   return (
-    <div className="bg-white rounded-none sm:rounded-3xl p-5 sm:p-8 shadow-sm border-y sm:border border-gray-100">
+    <div className="w-screen relative left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] sm:w-full sm:static sm:m-0 bg-white rounded-none sm:rounded-3xl p-4 sm:p-8 shadow-none sm:shadow-sm border-y sm:border border-gray-100">
+      {/* Header & Controls */}
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
         <div>
           <h3 className="text-lg sm:text-xl font-bold text-gray-800">
@@ -175,32 +190,31 @@ export default function TransactionHistory({
             placeholder="ค้นหา..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="flex-1 sm:flex-none border border-gray-200 rounded-full px-4 py-1.5 text-base outline-none focus:ring-2 focus:ring-zinc-900 bg-gray-50"
+            className="flex-1 sm:flex-none border border-gray-200 rounded-full px-4 py-1.5 text-sm sm:text-base outline-none focus:ring-2 focus:ring-zinc-900 bg-gray-50"
           />
           <select
             value={filterCategory}
             onChange={(e) => setFilterCategory(e.target.value)}
-            className="border border-gray-200 rounded-full px-4 py-1.5 text-base outline-none focus:ring-2 focus:ring-zinc-900 bg-gray-50"
+            className="border border-gray-200 rounded-full px-4 py-1.5 text-sm sm:text-base outline-none focus:ring-2 focus:ring-zinc-900 bg-gray-50"
           >
             <option value="all">ทุกหมวดหมู่</option>
-            <option value="อาหาร">อาหาร</option>
-            <option value="เดินทาง">เดินทาง</option>
-            <option value="ช้อปปิ้ง">ช้อปปิ้ง</option>
-            <option value="ที่พัก">ที่พัก</option>
-            <option value="ความบันเทิง">ความบันเทิง</option>
-            <option value="รายรับ">รายรับ</option>
-            <option value="อื่นๆ">อื่นๆ</option>
+            {categories.map((cat) => (
+              <option key={cat.id} value={cat.id}>
+                {cat.label}
+              </option>
+            ))}
           </select>
         </div>
       </div>
 
+      {/* Content */}
       {initialLoading ? (
         <div className="space-y-3">
           {[1, 2, 3].map((n) => (
             <div
               key={n}
               className="h-28 bg-gray-100 animate-pulse rounded-3xl"
-            ></div>
+            />
           ))}
         </div>
       ) : Object.keys(groupedTransactions).length === 0 ? (
@@ -235,7 +249,7 @@ export default function TransactionHistory({
                   const timeStr = extractTimeOnly(tx.date);
                   const catInfo = getCategoryInfo(tx.category);
                   const isIncome = tx.type === "income";
-                  const titleText = tx.note.trim() ? tx.note : tx.category;
+                  const titleText = tx.note?.trim() ? tx.note : catInfo.label;
 
                   return (
                     <div
@@ -249,7 +263,7 @@ export default function TransactionHistory({
                           <button
                             type="button"
                             onClick={() => setSelectedImage(tx.imageUrl)}
-                            className="relative shrink-0 w-24 h-24 sm:w-28 sm:h-28 rounded-2xl overflow-hidden group focus:outline-none shadow-sm"
+                            className="relative shrink-0 w-20 h-20 sm:w-24 sm:h-24 rounded-2xl overflow-hidden group focus:outline-none shadow-sm"
                             title="คลิกเพื่อดูรูปใหญ่"
                           >
                             <Image
@@ -262,7 +276,7 @@ export default function TransactionHistory({
                           </button>
                         ) : null}
 
-                        <div className="flex flex-col justify-center space-y-1 py-1">
+                        <div className="flex flex-col justify-center space-y-1 py-1 min-w-0">
                           <h4 className="font-extrabold text-gray-900 text-base sm:text-xl tracking-tight line-clamp-1">
                             {titleText}
                           </h4>
@@ -283,13 +297,13 @@ export default function TransactionHistory({
                         </div>
                       </div>
 
-                      <div className="flex flex-col items-end justify-between h-24 sm:h-28 shrink-0 pl-2">
-                        <div className="relative w-12 h-12 sm:w-16 sm:h-16">
+                      <div className="flex flex-col items-end justify-between h-20 sm:h-24 shrink-0 pl-2">
+                        <div className="relative w-10 h-10 sm:w-14 sm:h-14">
                           <Image
                             src={isIncome ? "/img/income.png" : catInfo.image}
                             alt={catInfo.label}
                             fill
-                            sizes="(max-width: 640px) 48px, 64px"
+                            sizes="(max-width: 640px) 40px, 56px"
                             className="object-contain"
                           />
                         </div>
@@ -307,6 +321,7 @@ export default function TransactionHistory({
             </div>
           ))}
 
+          {/* Pagination */}
           {totalPages > 1 && (
             <div className="flex items-center justify-between pt-6 border-t border-gray-100">
               <button
