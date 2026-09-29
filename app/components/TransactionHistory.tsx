@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Image from "next/image";
 
 export type Transaction = {
@@ -32,6 +32,8 @@ type GroupSummary = {
   totalDailyExpense: number;
 };
 
+const ITEMS_PER_PAGE = 10;
+
 export default function TransactionHistory({
   transactions,
   initialLoading,
@@ -40,6 +42,7 @@ export default function TransactionHistory({
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [filterCategory, setFilterCategory] = useState<string>("all");
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState<number>(1);
 
   const extractDateOnly = (rawStr: string) => {
     if (!rawStr) return "ไม่ระบุวันที่";
@@ -63,7 +66,20 @@ export default function TransactionHistory({
     return found ? found : { id: cat, label: cat, image: "/img/more.png" };
   };
 
-  // Filter
+  // ล็อกไม่ให้พื้นหลัง Scroll เมื่อเปิด Modal
+  useEffect(() => {
+    if (selectedImage) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "unset";
+    }
+
+    return () => {
+      document.body.style.overflow = "unset";
+    };
+  }, [selectedImage]);
+
+  // Filter รายการ
   const filteredTransactions = useMemo(() => {
     return transactions.filter((tx) => {
       const matchesSearch =
@@ -75,7 +91,17 @@ export default function TransactionHistory({
     });
   }, [transactions, searchTerm, filterCategory]);
 
-  // Grouping + Calculate Daily Summary
+  const totalPages = Math.ceil(filteredTransactions.length / ITEMS_PER_PAGE);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterCategory]);
+
+  const paginatedTransactions = useMemo(() => {
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredTransactions.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  }, [filteredTransactions, currentPage]);
+
   const groupedTransactions = useMemo(() => {
     const groups: { [key: string]: GroupSummary } = {};
 
@@ -93,7 +119,7 @@ export default function TransactionHistory({
       `${day}/${month}/${String(yearCE).slice(-2)}`,
     ];
 
-    filteredTransactions.forEach((tx) => {
+    paginatedTransactions.forEach((tx) => {
       const cleanDate = extractDateOnly(tx.date);
       const isToday = todayFormats.includes(cleanDate);
 
@@ -115,7 +141,6 @@ export default function TransactionHistory({
 
       groups[groupKey].items.push(tx);
 
-      // คำนวณยอดรวมรายวัน
       if (tx.type === "income") {
         groups[groupKey].totalDailyIncome += tx.amount;
       } else {
@@ -124,14 +149,25 @@ export default function TransactionHistory({
     });
 
     return groups;
-  }, [filteredTransactions]);
+  }, [paginatedTransactions]);
+
+  const handlePageChange = (page: number) => {
+    if (page >= 1 && page <= totalPages) {
+      setCurrentPage(page);
+    }
+  };
 
   return (
     <div className="bg-white rounded-none sm:rounded-3xl p-5 sm:p-8 shadow-sm border-y sm:border border-gray-100">
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
-        <h3 className="text-lg sm:text-xl font-bold text-gray-800">
-          ประวัติการใช้จ่าย
-        </h3>
+        <div>
+          <h3 className="text-lg sm:text-xl font-bold text-gray-800">
+            ประวัติการใช้จ่าย
+          </h3>
+          <p className="text-xs text-gray-500 mt-0.5">
+            พบทั้งหมด {filteredTransactions.length} รายการ
+          </p>
+        </div>
 
         <div className="flex flex-wrap gap-2">
           <input
@@ -175,7 +211,6 @@ export default function TransactionHistory({
         <div className="space-y-6">
           {Object.entries(groupedTransactions).map(([dateKey, group]) => (
             <div key={dateKey} className="space-y-3">
-              {/* หัวข้อวันที่ + สรุปยอดรวมประจำวัน */}
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2">
                 <span className="bg-gray-100 text-gray-700 font-semibold px-3 py-1 rounded-full text-xs shadow-sm border border-gray-200">
                   {group.label}
@@ -195,7 +230,6 @@ export default function TransactionHistory({
                 </div>
               </div>
 
-              {/* รายการธุรกรรมย่อยในวันนั้น */}
               <div className="space-y-3">
                 {group.items.map((tx) => {
                   const timeStr = extractTimeOnly(tx.date);
@@ -271,33 +305,78 @@ export default function TransactionHistory({
               </div>
             </div>
           ))}
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between pt-6 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={() => handlePageChange(currentPage - 1)}
+                disabled={currentPage === 1}
+                className="px-4 py-2 text-xs sm:text-sm font-bold rounded-full border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                ‹ ย้อนกลับ
+              </button>
+
+              <div className="flex items-center gap-1.5">
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map(
+                  (page) => (
+                    <button
+                      key={page}
+                      type="button"
+                      onClick={() => handlePageChange(page)}
+                      className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full text-xs sm:text-sm font-bold transition ${
+                        currentPage === page
+                          ? "bg-zinc-900 text-white shadow-md"
+                          : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  )
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handlePageChange(currentPage + 1)}
+                disabled={currentPage === totalPages}
+                className="px-4 py-2 text-xs sm:text-sm font-bold rounded-full border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                ถัดไป ›
+              </button>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Modal ดูรูปใบเสร็จขนาดใหญ่ */}
+      {/* Modal ดูรูปภาพขนาดใหญ่ (ปุ่ม X อยู่มุมขวาบนของหน้าจอ ไม่ทับรูป) */}
       {selectedImage && (
         <div
-          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-6 sm:p-12"
           onClick={() => setSelectedImage(null)}
         >
+          {/* ปุ่มปิด (X) ลอยอยู่นอกพื้นที่รูปภาพ (มุมขวาบนหน้าจอ) */}
+          <button
+            type="button"
+            onClick={() => setSelectedImage(null)}
+            className="fixed top-5 right-5 sm:top-8 sm:right-8 bg-white/20 hover:bg-white/40 text-white rounded-full w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center font-bold text-lg sm:text-xl z-50 backdrop-blur-md transition shadow-lg border border-white/20"
+            title="ปิด (Esc)"
+          >
+            ✕
+          </button>
+
+          {/* Container รูปภาพหลัก */}
           <div
-            className="relative max-w-lg w-full bg-white rounded-3xl p-4 overflow-hidden shadow-2xl"
+            className="relative w-full max-w-3xl h-[80vh] flex items-center justify-center"
             onClick={(e) => e.stopPropagation()}
           >
-            <button
-              type="button"
-              onClick={() => setSelectedImage(null)}
-              className="absolute top-4 right-4 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-full w-8 h-8 flex items-center justify-center font-bold z-10"
-            >
-              ✕
-            </button>
-            <div className="relative h-96 w-full mt-2">
+            <div className="relative w-full h-full">
               <Image
                 src={selectedImage}
                 alt="Receipt Full"
                 fill
                 unoptimized
-                className="object-contain rounded-2xl"
+                className="object-contain drop-shadow-2xl"
               />
             </div>
           </div>
