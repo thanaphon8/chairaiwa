@@ -471,7 +471,7 @@ export default function AddTransactionForm({
               onClick={() => setShowNotePresets((prev) => !prev)}
               className="text-xs font-semibold text-zinc-600 hover:text-zinc-900 underline transition-colors"
             >
-              {showNotePresets ? "ซ่อนตัวเลือกด่วน" : "⚡ ตัวเลือกด่วน"}
+              {showNotePresets ? "ซ่อนตัวเลือกด่วน" : "ตัวเลือกด่วน"}
             </button>
           </div>
 

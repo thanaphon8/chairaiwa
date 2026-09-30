@@ -53,30 +53,24 @@ export default function DashboardCard({
           <div className="grid grid-cols-2 gap-4 sm:gap-8 pt-1">
             {/* รายรับ */}
             <div className="flex items-center gap-3 sm:gap-4">
-              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-emerald-950/80 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-sm shrink-0">
-                <span className="text-base sm:text-lg font-bold">↓</span>
-              </div>
               <div className="min-w-0">
                 <span className="block text-[11px] sm:text-sm font-medium text-[#D4B595]/70 truncate">
                   รายรับทั้งหมด
                 </span>
-                <span className="text-xs sm:text-xl font-bold text-emerald-400 truncate block">
-                  +฿{totalIncome.toLocaleString()}
+                <span className="text-sm sm:text-xl font-bold text-emerald-400 truncate block">
+                  ฿{totalIncome.toLocaleString()}
                 </span>
               </div>
             </div>
 
             {/* รายจ่าย */}
             <div className="flex items-center gap-3 sm:gap-4">
-              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-rose-950/80 border border-rose-500/30 flex items-center justify-center text-rose-400 shadow-sm shrink-0">
-                <span className="text-base sm:text-lg font-bold">↑</span>
-              </div>
               <div className="min-w-0">
                 <span className="block text-[11px] sm:text-sm font-medium text-[#D4B595]/70 truncate">
                   รายจ่ายทั้งหมด
                 </span>
-                <span className="text-xs sm:text-xl font-bold text-rose-400 truncate block">
-                  -฿{totalExpense.toLocaleString()}
+                <span className="text-sm sm:text-xl font-bold text-rose-400 truncate block">
+                  ฿{totalExpense.toLocaleString()}
                 </span>
               </div>
             </div>
