@@ -14,7 +14,6 @@ type AddTransactionFormProps = {
   onSuccess: () => void | Promise<void>;
 };
 
-// 📌 พรีเซตคำสำหรับแต่ละหมวดหมู่
 const PRESETS_BY_CATEGORY: Record<string, string[]> = {
   อาหาร: [
     "กะเพราหมูกรอบ",
@@ -44,13 +43,7 @@ const PRESETS_BY_CATEGORY: Record<string, string[]> = {
     "ของ Shopee/Lazada",
     "หนังสือ",
   ],
-  ที่พัก: [
-    "ค่าเช่าห้อง",
-    "ค่าน้ำ",
-    "ค่าไฟ",
-    "ค่าส่วนกลาง",
-    "ค่าแก๊ส",
-  ],
+  ที่พัก: ["ค่าเช่าห้อง", "ค่าน้ำ", "ค่าไฟ", "ค่าส่วนกลาง", "ค่าแก๊ส"],
   ความบันเทิง: [
     "ค่าอินเทอร์เน็ต",
     "ตั๋วหนัง",
@@ -81,6 +74,13 @@ export default function AddTransactionForm({
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [filePreview, setFilePreview] = useState<string | null>(null);
 
+  // 📌 Ref เพื่อเก็บค่า amount และ note ล่าสุด ป้องกันปัญหา Stale Closure ตอนลากสไลเดอร์
+  const amountRef = useRef<string>("");
+  amountRef.current = amount;
+
+  const noteRef = useRef<string>("");
+  noteRef.current = note;
+
   // State สำหรับควบคุมการแสดงผล Quick Presets
   const [showNotePresets, setShowNotePresets] = useState<boolean>(false);
 
@@ -95,8 +95,9 @@ export default function AddTransactionForm({
   const currentSliderPosRef = useRef<number>(0);
   const animationFrameRef = useRef<number | null>(null);
 
-  // Ref สำหรับ File Input
+  // Ref สำหรับ File Input และ Amount Input
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const amountInputRef = useRef<HTMLInputElement>(null);
 
   // Cleanup Object URL เพื่อป้องกัน Memory Leak
   useEffect(() => {
@@ -132,12 +133,33 @@ export default function AddTransactionForm({
     }
   };
 
+  // ปรับปรุงฟังก์ชันแปลงและตรวจสอบจำนวนเงิน
+  const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let val = e.target.value;
+    val = val.replace(/[^0-9.,]/g, "");
+    setAmount(val);
+  };
+
+  // 📌 ฟังก์ชันเลือก Preset
+  const handleSelectPreset = (preset: string) => {
+    setNote(preset);
+    noteRef.current = preset;
+  };
+
   // Submit Data
   const submitData = async () => {
-    if (!amount || isNaN(Number(amount))) {
-      alert("กรุณาระบุจำนวนเงินให้ถูกต้อง");
+    // ดึงค่า amount และ note ล่าสุดจาก Ref
+    const currentAmountStr = (amountRef.current || "")
+      .replace(/,/g, ".")
+      .trim();
+    const numericAmount = parseFloat(currentAmountStr);
+    const currentNote = noteRef.current || "";
+
+    if (!currentAmountStr || isNaN(numericAmount) || numericAmount <= 0) {
+      alert("กรุณาระบุจำนวนเงินให้ถูกต้อง (ต้องเป็นตัวเลขที่มากกว่า 0)");
       setSliderPosition(0);
       currentSliderPosRef.current = 0;
+      amountInputRef.current?.focus();
       return;
     }
 
@@ -159,8 +181,8 @@ export default function AddTransactionForm({
       formData.append("date", formattedDateStr);
       formData.append("type", type === "income" ? "รายรับ" : "รายจ่าย");
       formData.append("category", txCategory);
-      formData.append("amount", amount);
-      formData.append("note", note);
+      formData.append("amount", String(numericAmount));
+      formData.append("note", currentNote);
 
       if (imageFile) {
         formData.append("file", imageFile);
@@ -183,6 +205,7 @@ export default function AddTransactionForm({
       // Clear Form
       setAmount("");
       setNote("");
+      noteRef.current = "";
       setShowNotePresets(false);
       handleRemoveFile();
     } catch (error) {
@@ -209,20 +232,23 @@ export default function AddTransactionForm({
     dragStartXRef.current = clientX - currentSliderPosRef.current;
   };
 
-  const handleMove = useCallback((clientX: number) => {
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-    }
+  const handleMove = useCallback(
+    (clientX: number) => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
 
-    animationFrameRef.current = requestAnimationFrame(() => {
-      const maxDrag = getMaxDrag();
-      let newX = clientX - dragStartXRef.current;
-      if (newX < 0) newX = 0;
-      if (newX > maxDrag) newX = maxDrag;
-      currentSliderPosRef.current = newX;
-      setSliderPosition(newX);
-    });
-  }, [getMaxDrag]);
+      animationFrameRef.current = requestAnimationFrame(() => {
+        const maxDrag = getMaxDrag();
+        let newX = clientX - dragStartXRef.current;
+        if (newX < 0) newX = 0;
+        if (newX > maxDrag) newX = maxDrag;
+        currentSliderPosRef.current = newX;
+        setSliderPosition(newX);
+      });
+    },
+    [getMaxDrag]
+  );
 
   const handleEnd = useCallback(() => {
     setIsDragging(false);
@@ -262,7 +288,6 @@ export default function AddTransactionForm({
     };
   }, [isDragging, handleMove, handleEnd]);
 
-  // พรีเซตของหมวดหมู่ที่เลือกอยู่ปัจจุบัน
   const activePresets =
     type === "expense"
       ? PRESETS_BY_CATEGORY[category] || []
@@ -277,7 +302,6 @@ export default function AddTransactionForm({
       <div className="space-y-5">
         {/* สลับ รายจ่าย / รายรับ */}
         <div className="grid grid-cols-2 gap-4">
-          {/* ปุ่ม รายจ่าย */}
           <button
             type="button"
             onClick={() => setType("expense")}
@@ -313,7 +337,6 @@ export default function AddTransactionForm({
             </span>
           </button>
 
-          {/* ปุ่ม รายรับ */}
           <button
             type="button"
             onClick={() => setType("income")}
@@ -389,7 +412,9 @@ export default function AddTransactionForm({
 
                     <span
                       className={`text-xs mt-2 text-center font-medium transition-colors ${
-                        isSelected ? "text-zinc-900 font-bold" : "text-gray-500"
+                        isSelected
+                          ? "text-zinc-900 font-bold"
+                          : "text-gray-500"
                       }`}
                     >
                       {cat.label}
@@ -419,13 +444,12 @@ export default function AddTransactionForm({
             </div>
 
             <input
-              type="number"
-              step="any"
+              ref={amountInputRef}
+              type="text"
               inputMode="decimal"
               value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              onWheel={(e) => e.currentTarget.blur()}
-              className="w-full border-2 border-[#5C3D2E]/20 focus:border-[#4A2E1F] rounded-full py-3.5 pl-16 pr-6 outline-none bg-amber-50/30 text-[#2C1810] font-bold text-lg sm:text-2xl transition-all shadow-inner [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none placeholder:text-gray-400 focus:bg-white"
+              onChange={handleAmountChange}
+              className="w-full border-2 border-[#5C3D2E]/20 focus:border-[#4A2E1F] rounded-full py-3.5 pl-16 pr-16 outline-none bg-amber-50/30 text-[#2C1810] font-bold text-lg sm:text-2xl transition-all shadow-inner placeholder:text-gray-400 focus:bg-white"
               placeholder="0.00"
               required
             />
@@ -447,7 +471,7 @@ export default function AddTransactionForm({
               onClick={() => setShowNotePresets((prev) => !prev)}
               className="text-xs font-semibold text-zinc-600 hover:text-zinc-900 underline transition-colors"
             >
-              {showNotePresets ? "ซ่อนตัวเลือกด่วน" : "ตัวเลือกด่วน"}
+              {showNotePresets ? "ซ่อนตัวเลือกด่วน" : "⚡ ตัวเลือกด่วน"}
             </button>
           </div>
 
@@ -455,7 +479,10 @@ export default function AddTransactionForm({
             type="text"
             value={note}
             onFocus={() => setShowNotePresets(true)}
-            onChange={(e) => setNote(e.target.value)}
+            onChange={(e) => {
+              setNote(e.target.value);
+              noteRef.current = e.target.value;
+            }}
             className="w-full border border-gray-200 rounded-full px-5 py-3.5 focus:ring-2 focus:ring-zinc-900 outline-none bg-gray-50 text-gray-900 text-base"
             placeholder="เช่น ข้าวกะเพราหมูกรอบ, เติมบัตรแรบบิท"
           />
@@ -475,7 +502,7 @@ export default function AddTransactionForm({
                     <button
                       key={preset}
                       type="button"
-                      onClick={() => setNote(preset)}
+                      onClick={() => handleSelectPreset(preset)}
                       className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200 ${
                         isSelected
                           ? "bg-zinc-900 text-white shadow-sm scale-105"
