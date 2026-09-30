@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import Image from "next/image";
 
 export type Transaction = {
@@ -27,12 +27,53 @@ type TransactionHistoryProps = {
 
 type GroupSummary = {
   label: string;
+  dateText: string;
   items: Transaction[];
   totalDailyIncome: number;
   totalDailyExpense: number;
 };
 
 const ITEMS_PER_PAGE = 10;
+const INCOME_FILTER = "รายรับ";
+
+const fmt = (n: number) =>
+  Math.abs(n).toLocaleString("th-TH", { maximumFractionDigits: 2 });
+
+// ---------- helpers (pure) ----------
+
+const extractDateOnly = (rawStr: string) => {
+  if (!rawStr) return "ไม่ระบุวันที่";
+  return rawStr.split(/[T\s]+/)[0].trim();
+};
+
+const extractTimeOnly = (rawStr: string) => {
+  if (!rawStr) return "";
+  const m = rawStr.match(/(\d{1,2}):(\d{2})/);
+  return m ? `${m[1].padStart(2, "0")}:${m[2]} น.` : "";
+};
+
+const isValidImageUrl = (url: string | null | undefined) => {
+  if (!url) return false;
+  const clean = url.trim();
+  return clean !== "" && clean !== "null" && clean !== "undefined";
+};
+
+// รูปแบบวันที่ที่อาจพบใน Sheet (ค.ศ./พ.ศ. ปีเต็ม/ย่อ)
+const dateFormats = (d: Date) => {
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const ce = d.getFullYear();
+  const be = ce + 543;
+  return [
+    `${ce}-${month}-${day}`,
+    `${day}/${month}/${be}`,
+    `${day}/${month}/${ce}`,
+    `${day}/${month}/${String(be).slice(-2)}`,
+    `${day}/${month}/${String(ce).slice(-2)}`,
+  ];
+};
+
+// ---------- component ----------
 
 export default function TransactionHistory({
   transactions = [],
@@ -43,357 +84,407 @@ export default function TransactionHistory({
   const [filterCategory, setFilterCategory] = useState<string>("all");
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState<number>(1);
+  const [failedImages, setFailedImages] = useState<Set<number>>(new Set());
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  // สกัดเอาเฉพาะส่วนของวันที่
-  const extractDateOnly = (rawStr: string) => {
-    if (!rawStr) return "ไม่ระบุวันที่";
-    const parts = rawStr.split(/[T\s]+/);
-    return parts[0].trim();
-  };
-
-  // สกัดเอาเฉพาะส่วนเวลา
-  const extractTimeOnly = (rawStr: string) => {
-    if (!rawStr) return "";
-    const timeMatch = rawStr.match(/(\d{1,2}):(\d{2})/);
-    if (timeMatch) {
-      const hours = timeMatch[1].padStart(2, "0");
-      const minutes = timeMatch[2];
-      return `${hours}:${minutes} น.`;
-    }
-    return "";
-  };
-
-  // ดึงข้อมูลหมวดหมู่
   const getCategoryInfo = (cat: string) => {
     const found = categories.find((c) => c.id === cat || c.label === cat);
-    return found ? found : { id: cat, label: cat, image: "/img/income.png" };
+    return found ?? { id: cat, label: cat, image: "/img/more.png" };
   };
 
-  // ล็อกไม่ให้พื้นหลัง Scroll และรองรับปุ่ม Esc เมื่อเปิด Modal
+  // ล็อกการเลื่อนพื้นหลัง + ปิด modal ด้วย Esc
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setSelectedImage(null);
-      }
-    };
+    if (!selectedImage) return;
 
-    if (selectedImage) {
-      document.body.style.overflow = "hidden";
-      window.addEventListener("keydown", handleKeyDown);
-    } else {
-      document.body.style.overflow = "unset";
-    }
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelectedImage(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
 
     return () => {
-      document.body.style.overflow = "unset";
-      window.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
     };
   }, [selectedImage]);
 
-  // กรองรายการ
+  // กรองรายการ (ค้นหาจากบันทึก + ชื่อหมวดหมู่)
   const filteredTransactions = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
     return transactions.filter((tx) => {
+      const label = getCategoryInfo(tx.category).label;
       const matchesSearch =
-        tx.note.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        tx.category.toLowerCase().includes(searchTerm.toLowerCase());
+        !q ||
+        (tx.note || "").toLowerCase().includes(q) ||
+        tx.category.toLowerCase().includes(q) ||
+        label.toLowerCase().includes(q);
       const matchesCategory =
         filterCategory === "all" ? true : tx.category === filterCategory;
       return matchesSearch && matchesCategory;
     });
-  }, [transactions, searchTerm, filterCategory]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transactions, searchTerm, filterCategory, categories]);
 
-  const totalPages = Math.ceil(filteredTransactions.length / ITEMS_PER_PAGE);
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredTransactions.length / ITEMS_PER_PAGE)
+  );
 
-  // รีเซ็ตกลับไปหน้า 1 เมื่อมีการค้นหาหรือเปลี่ยนตัวกรอง
+  // เปลี่ยนตัวกรอง/คำค้น -> กลับหน้า 1
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, filterCategory]);
 
-  // แบ่งหน้า
+  // ถ้าจำนวนหน้าลดลง (เช่น ข้อมูลรีเฟรช) ไม่ให้ค้างอยู่หน้าที่ไม่มีอยู่จริง
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
+
   const paginatedTransactions = useMemo(() => {
-    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-    return filteredTransactions.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+    const start = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredTransactions.slice(start, start + ITEMS_PER_PAGE);
   }, [filteredTransactions, currentPage]);
 
-  // จัดกลุ่มตามวันที่
+  // ยอดรวมรายวัน: รวมจากทุกรายการที่ผ่านตัวกรอง ข้ามทุกหน้า
+  // (วันที่มีรายการเยอะจนถูกแบ่งไปหลายหน้า จะยังเห็นยอดรวมทั้งวันตรงหัววัน)
+  const dailyTotals = useMemo(() => {
+    const totals = new Map<string, { income: number; expense: number }>();
+    filteredTransactions.forEach((tx) => {
+      const key = extractDateOnly(tx.date);
+      const t = totals.get(key) ?? { income: 0, expense: 0 };
+      if (tx.type === "income") t.income += tx.amount;
+      else t.expense += tx.amount;
+      totals.set(key, t);
+    });
+    return totals;
+  }, [filteredTransactions]);
+
+  // จัดกลุ่มตามวันที่ (วันนี้ / เมื่อวาน / วันที่)
   const groupedTransactions = useMemo(() => {
-    const groups: { [key: string]: GroupSummary } = {};
+    const groups = new Map<string, GroupSummary>();
 
     const now = new Date();
-    const day = String(now.getDate()).padStart(2, "0");
-    const month = String(now.getMonth() + 1).padStart(2, "0");
-    const yearCE = now.getFullYear();
-    const yearBE = yearCE + 543;
-
-    const todayFormats = [
-      `${yearCE}-${month}-${day}`,
-      `${day}/${month}/${yearBE}`,
-      `${day}/${month}/${yearCE}`,
-      `${day}/${month}/${String(yearBE).slice(-2)}`,
-      `${day}/${month}/${String(yearCE).slice(-2)}`,
-    ];
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const todayFormats = dateFormats(now);
+    const yesterdayFormats = dateFormats(yesterday);
 
     paginatedTransactions.forEach((tx) => {
-      const cleanDate = extractDateOnly(tx.date);
-      const isToday = todayFormats.includes(cleanDate);
+      const dateText = extractDateOnly(tx.date);
 
-      const groupKey = cleanDate || "unknown";
-      let displayLabel = cleanDate;
+      let label = dateText;
+      if (todayFormats.includes(dateText)) label = "วันนี้";
+      else if (yesterdayFormats.includes(dateText)) label = "เมื่อวาน";
 
-      if (isToday) {
-        displayLabel = `วันนี้ (${cleanDate})`;
-      }
-
-      if (!groups[groupKey]) {
-        groups[groupKey] = {
-          label: displayLabel,
+      let group = groups.get(dateText);
+      if (!group) {
+        group = {
+          label,
+          dateText,
           items: [],
-          totalDailyIncome: 0,
-          totalDailyExpense: 0,
+          totalDailyIncome: dailyTotals.get(dateText)?.income ?? 0,
+          totalDailyExpense: dailyTotals.get(dateText)?.expense ?? 0,
         };
+        groups.set(dateText, group);
       }
 
-      groups[groupKey].items.push(tx);
-
-      if (tx.type === "income") {
-        groups[groupKey].totalDailyIncome += tx.amount;
-      } else {
-        groups[groupKey].totalDailyExpense += tx.amount;
-      }
+      group.items.push(tx);
     });
 
-    return groups;
-  }, [paginatedTransactions]);
+    return Array.from(groups.entries());
+  }, [paginatedTransactions, dailyTotals]);
 
   const handlePageChange = (page: number) => {
-    if (page >= 1 && page <= totalPages) {
-      setCurrentPage(page);
-    }
+    if (page < 1 || page > totalPages) return;
+    setCurrentPage(page);
+    containerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  return (
-    <div className="w-screen relative left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] sm:w-full sm:static sm:m-0 bg-white rounded-none sm:rounded-3xl p-4 sm:p-8 shadow-none sm:shadow-sm border-y sm:border border-gray-100">
-      {/* Header & Controls */}
-      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
-        <div>
-          <h3 className="text-lg sm:text-xl font-bold text-gray-800">
-            ประวัติการใช้จ่าย
-          </h3>
-          <p className="text-xs text-gray-500 mt-0.5">
-            พบทั้งหมด {filteredTransactions.length} รายการ
-          </p>
-        </div>
+  const markImageFailed = (id: number) => {
+    setFailedImages((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  };
 
-        <div className="flex flex-wrap gap-2">
-          <input
-            type="text"
-            placeholder="ค้นหา..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="flex-1 sm:flex-none border border-gray-200 rounded-full px-4 py-1.5 text-sm sm:text-base outline-none focus:ring-2 focus:ring-zinc-900 bg-gray-50"
-          />
-          <select
-            value={filterCategory}
-            onChange={(e) => setFilterCategory(e.target.value)}
-            className="border border-gray-200 rounded-full px-4 py-1.5 text-sm sm:text-base outline-none focus:ring-2 focus:ring-zinc-900 bg-gray-50"
-          >
-            <option value="all">ทุกหมวดหมู่</option>
-            {categories.map((cat) => (
-              <option key={cat.id} value={cat.id}>
-                {cat.label}
-              </option>
-            ))}
-          </select>
-        </div>
+  const hasAnyTransactions = transactions.length > 0;
+  const focusRing =
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5C38C9] focus-visible:ring-offset-2";
+
+  return (
+    <div
+      ref={containerRef}
+      className="-mx-4 bg-white px-5 py-6 sm:mx-0 sm:rounded-3xl sm:border sm:border-gray-100 sm:p-8 sm:shadow-sm"
+    >
+      {/* Header */}
+      <div className="flex items-baseline justify-between gap-3">
+        <h3 className="text-lg font-semibold text-zinc-900 sm:text-xl">
+          ประวัติการใช้จ่าย
+        </h3>
+        <p className="shrink-0 text-xs text-zinc-500">
+          {filteredTransactions.length} รายการ
+        </p>
+      </div>
+
+      {/* ค้นหา (16px ป้องกัน iOS ซูมเองตอนโฟกัส) */}
+      <input
+        type="search"
+        placeholder="ค้นหารายการ"
+        value={searchTerm}
+        onChange={(e) => setSearchTerm(e.target.value)}
+        className="mt-4 h-11 w-full rounded-full bg-zinc-100 px-5 text-base text-zinc-900 outline-none transition placeholder:text-zinc-400 focus:bg-white focus:ring-2 focus:ring-[#5C38C9]"
+      />
+
+      {/* ตัวกรองหมวดหมู่: เลื่อนแนวนอนด้วยนิ้วโป้งได้ */}
+      <div
+        role="tablist"
+        aria-label="กรองตามหมวดหมู่"
+        className="-mx-5 mt-3 flex gap-2 overflow-x-auto px-5 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:px-0 [&::-webkit-scrollbar]:hidden"
+      >
+        {[
+          { id: "all", label: "ทั้งหมด" },
+          ...categories.map((c) => ({ id: c.id, label: c.label })),
+          { id: INCOME_FILTER, label: "รายรับ" },
+        ].map((opt) => {
+          const active = filterCategory === opt.id;
+          return (
+            <button
+              key={opt.id}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => setFilterCategory(opt.id)}
+              className={`h-9 shrink-0 whitespace-nowrap rounded-full px-4 text-sm font-medium transition ${focusRing} ${
+                active
+                  ? "bg-[#5C38C9] text-white"
+                  : "bg-zinc-100 text-zinc-600 active:bg-zinc-200"
+              }`}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* Content */}
-      {initialLoading ? (
-        <div className="space-y-3">
-          {[1, 2, 3].map((n) => (
-            <div
-              key={n}
-              className="h-28 bg-gray-100 animate-pulse rounded-3xl"
-            />
-          ))}
-        </div>
-      ) : Object.keys(groupedTransactions).length === 0 ? (
-        <p className="text-center text-gray-400 py-8 text-sm">
-          ไม่พบรายการบันทึก
-        </p>
-      ) : (
-        <div className="space-y-6">
-          {Object.entries(groupedTransactions).map(([dateKey, group]) => (
-            <div key={dateKey} className="space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2">
-                <span className="bg-gray-100 text-gray-700 font-semibold px-3 py-1 rounded-full text-xs shadow-sm border border-gray-200">
-                  {group.label}
-                </span>
-
-                <div className="flex items-center gap-3 text-xs sm:text-sm font-bold">
-                  {group.totalDailyIncome > 0 && (
-                    <span className="text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-md border border-emerald-100">
-                      +฿{group.totalDailyIncome.toLocaleString()}
-                    </span>
-                  )}
-                  {group.totalDailyExpense > 0 && (
-                    <span className="text-red-500 bg-red-50 px-2.5 py-0.5 rounded-md border border-red-100">
-                      -฿{group.totalDailyExpense.toLocaleString()}
-                    </span>
-                  )}
+      <div className="mt-6">
+        {initialLoading ? (
+          <div className="space-y-4" aria-busy="true">
+            {[1, 2, 3, 4].map((n) => (
+              <div key={n} className="flex items-center gap-3">
+                <div className="h-11 w-11 shrink-0 animate-pulse rounded-full bg-zinc-100" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-3.5 w-1/2 animate-pulse rounded bg-zinc-100" />
+                  <div className="h-3 w-1/3 animate-pulse rounded bg-zinc-100" />
                 </div>
+                <div className="h-4 w-16 animate-pulse rounded bg-zinc-100" />
               </div>
+            ))}
+          </div>
+        ) : groupedTransactions.length === 0 ? (
+          <div className="py-12 text-center">
+            <p className="text-sm font-medium text-zinc-700">
+              {hasAnyTransactions ? "ไม่พบรายการที่ตรงกัน" : "ยังไม่มีรายการ"}
+            </p>
+            <p className="mt-1 text-xs text-zinc-500">
+              {hasAnyTransactions
+                ? "ลองเปลี่ยนคำค้นหาหรือหมวดหมู่"
+                : "เพิ่มรายการแรกได้ที่ฟอร์มด้านบน"}
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-7">
+            {groupedTransactions.map(([dateKey, group]) => (
+              <section key={dateKey}>
+                {/* หัววัน + ยอดรวมของวัน */}
+                <div className="flex items-baseline justify-between gap-3 border-b border-zinc-100 pb-2">
+                  <h4 className="min-w-0 truncate whitespace-nowrap text-sm font-semibold text-zinc-900">
+                    {group.label}
+                    {group.label !== group.dateText && (
+                      <span className="ml-2 text-xs font-normal text-zinc-500">
+                        {group.dateText}
+                      </span>
+                    )}
+                  </h4>
 
-              <div className="space-y-3">
-                {group.items.map((tx) => {
-                  const timeStr = extractTimeOnly(tx.date);
-                  const catInfo = getCategoryInfo(tx.category);
-                  const isIncome = tx.type === "income";
-                  const titleText = tx.note?.trim() ? tx.note : catInfo.label;
+                  <div className="flex shrink-0 items-baseline gap-3 whitespace-nowrap text-xs font-medium tabular-nums">
+                    {group.totalDailyIncome > 0 && (
+                      <span className="text-emerald-600">
+                        +฿{fmt(group.totalDailyIncome)}
+                      </span>
+                    )}
+                    {group.totalDailyExpense > 0 && (
+                      <span className="text-zinc-500">
+                        -฿{fmt(group.totalDailyExpense)}
+                      </span>
+                    )}
+                  </div>
+                </div>
 
-                  return (
-                    <div
-                      key={tx.id}
-                      className={`relative overflow-hidden rounded-[28px] p-3 sm:p-4 flex justify-between items-center transition shadow-sm ${
-                        isIncome ? "bg-emerald-50/80" : "bg-red-50/80"
-                      }`}
-                    >
-                      <div className="flex items-center gap-3 sm:gap-4 flex-1 pr-2 min-w-0">
-                        {tx.imageUrl ? (
-                          <button
-                            type="button"
-                            onClick={() => setSelectedImage(tx.imageUrl)}
-                            className="relative shrink-0 w-20 h-20 sm:w-24 sm:h-24 rounded-2xl overflow-hidden group focus:outline-none shadow-sm"
-                            title="คลิกเพื่อดูรูปใหญ่"
-                          >
-                            <Image
-                              src={tx.imageUrl}
-                              alt="Receipt"
-                              fill
-                              unoptimized
-                              className="object-cover group-hover:scale-105 transition-transform duration-200"
-                            />
-                          </button>
-                        ) : null}
+                <ul className="divide-y divide-zinc-100">
+                  {group.items.map((tx) => {
+                    const timeStr = extractTimeOnly(tx.date);
+                    const catInfo = getCategoryInfo(tx.category);
+                    const isIncome = tx.type === "income";
+                    const hasNote = !!tx.note?.trim();
+                    const titleText = hasNote
+                      ? tx.note
+                      : isIncome
+                      ? "รายรับ"
+                      : catInfo.label;
+                    const hasImage = isValidImageUrl(tx.imageUrl);
+                    const imageFailed = failedImages.has(tx.id);
 
-                        <div className="flex flex-col justify-center space-y-1 py-1 min-w-0">
-                          <h4 className="font-extrabold text-gray-900 text-base sm:text-xl tracking-tight line-clamp-1">
-                            {titleText}
-                          </h4>
-
-                          {timeStr && (
-                            <p className="text-gray-400 text-xs sm:text-sm font-medium">
-                              {timeStr}
-                            </p>
-                          )}
-
-                          <p
-                            className={`font-black text-xl sm:text-2xl pt-1 ${
-                              isIncome ? "text-emerald-600" : "text-red-600"
-                            }`}
-                          >
-                            {isIncome ? "+" : "-"}฿{tx.amount.toLocaleString()}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col items-end justify-between h-20 sm:h-24 shrink-0 pl-2">
-                        <div className="relative w-10 h-10 sm:w-14 sm:h-14">
+                    return (
+                      <li key={tx.id} className="flex items-center gap-3 py-3.5 lg:gap-4 lg:py-4 lg:transition-colors lg:hover:bg-zinc-50/70">
+                        {/* ไอคอนหมวดหมู่ */}
+                        <div className="relative h-11 w-11 shrink-0 rounded-full bg-[#5C38C9]/10 lg:h-12 lg:w-12">
                           <Image
                             src={isIncome ? "/img/income.png" : catInfo.image}
-                            alt={catInfo.label}
+                            alt=""
                             fill
-                            sizes="(max-width: 640px) 40px, 56px"
-                            className="object-contain"
+                            sizes="48px"
+                            className="object-contain p-2"
                           />
                         </div>
 
-                        <div className="bg-white px-3 sm:px-4 py-1 sm:py-1.5 rounded-full shadow-sm border border-gray-100/60">
-                          <span className="text-xs sm:text-sm font-bold text-gray-800 whitespace-nowrap">
-                            {isIncome ? "รายรับ" : catInfo.label}
-                          </span>
+                        {/* ชื่อรายการ */}
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[15px] font-medium text-zinc-900 lg:text-base">
+                            {titleText}
+                          </p>
+                          <p className="mt-0.5 flex gap-2 text-xs text-zinc-500">
+                            {hasNote && (
+                              <span className="truncate">
+                                {isIncome ? "รายรับ" : catInfo.label}
+                              </span>
+                            )}
+                            {timeStr && (
+                              <span className="shrink-0">{timeStr}</span>
+                            )}
+                          </p>
                         </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
 
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between pt-6 border-t border-gray-100">
-              <button
-                type="button"
-                onClick={() => handlePageChange(currentPage - 1)}
-                disabled={currentPage === 1}
-                className="px-4 py-2 text-xs sm:text-sm font-bold rounded-full border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                        {/* จำนวนเงิน */}
+                        <p
+                          className={`shrink-0 text-base font-semibold tabular-nums lg:text-lg ${
+                            isIncome ? "text-emerald-600" : "text-zinc-900"
+                          }`}
+                        >
+                          {isIncome ? "+" : "-"}฿{fmt(tx.amount)}
+                        </p>
+
+                        {/* รูปใบเสร็จ */}
+                        {hasImage &&
+                          (imageFailed ? (
+                            <div
+                              title="โหลดรูปไม่สำเร็จ"
+                              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-zinc-100 text-zinc-400 lg:h-14 lg:w-14"
+                            >
+                              <svg
+                                className="h-5 w-5"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth={1.8}
+                                viewBox="0 0 24 24"
+                                aria-label="โหลดรูปไม่สำเร็จ"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  d="M4 16l4.6-4.6a2 2 0 012.8 0L16 16m-2-2l1.6-1.6a2 2 0 012.8 0L20 14M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                                />
+                              </svg>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedImage(tx.imageUrl)}
+                              aria-label="ดูรูปใบเสร็จ"
+                              className={`h-11 w-11 shrink-0 overflow-hidden rounded-xl bg-zinc-100 lg:h-14 lg:w-14 lg:cursor-pointer ${focusRing}`}
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={tx.imageUrl!}
+                                alt="ใบเสร็จ"
+                                loading="lazy"
+                                referrerPolicy="no-referrer"
+                                onError={() => markImageFailed(tx.id)}
+                                className="h-full w-full object-cover"
+                              />
+                            </button>
+                          ))}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            ))}
+
+            {/* Pagination: กะทัดรัด ไม่ล้นจอเมื่อมีหลายหน้า */}
+            {totalPages > 1 && (
+              <nav
+                aria-label="เปลี่ยนหน้า"
+                className="flex items-center justify-between gap-3 border-t border-zinc-100 pt-5"
               >
-                ‹ ย้อนกลับ
-              </button>
+                <button
+                  type="button"
+                  onClick={() => handlePageChange(currentPage - 1)}
+                  disabled={currentPage === 1}
+                  className={`h-11 rounded-full border border-zinc-200 px-5 text-sm font-medium text-zinc-700 transition active:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 ${focusRing}`}
+                >
+                  ย้อนกลับ
+                </button>
 
-              <div className="flex items-center gap-1.5">
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map(
-                  (page) => (
-                    <button
-                      key={page}
-                      type="button"
-                      onClick={() => handlePageChange(page)}
-                      className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full text-xs sm:text-sm font-bold transition ${
-                        currentPage === page
-                          ? "bg-zinc-900 text-white shadow-md"
-                          : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                      }`}
-                    >
-                      {page}
-                    </button>
-                  )
-                )}
-              </div>
+                <p className="text-sm text-zinc-500 tabular-nums">
+                  หน้า <span className="font-semibold text-zinc-900">{currentPage}</span>{" "}
+                  จาก {totalPages}
+                </p>
 
-              <button
-                type="button"
-                onClick={() => handlePageChange(currentPage + 1)}
-                disabled={currentPage === totalPages}
-                className="px-4 py-2 text-xs sm:text-sm font-bold rounded-full border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
-              >
-                ถัดไป ›
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+                <button
+                  type="button"
+                  onClick={() => handlePageChange(currentPage + 1)}
+                  disabled={currentPage === totalPages}
+                  className={`h-11 rounded-full bg-[#5C38C9] px-5 text-sm font-medium text-white transition active:bg-[#4b2ca8] disabled:cursor-not-allowed disabled:opacity-40 ${focusRing}`}
+                >
+                  ถัดไป
+                </button>
+              </nav>
+            )}
+          </div>
+        )}
+      </div>
 
-      {/* Modal ดูรูปภาพขนาดใหญ่ */}
+      {/* Modal ดูรูปใบเสร็จขนาดใหญ่ */}
       {selectedImage && (
         <div
-          className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-6 sm:p-12"
+          role="dialog"
+          aria-modal="true"
+          aria-label="รูปใบเสร็จ"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm"
           onClick={() => setSelectedImage(null)}
         >
           <button
             type="button"
             onClick={() => setSelectedImage(null)}
-            className="fixed top-5 right-5 sm:top-8 sm:right-8 bg-white/20 hover:bg-white/40 text-white rounded-full w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center font-bold text-lg sm:text-xl z-50 backdrop-blur-md transition shadow-lg border border-white/20"
-            title="ปิด (Esc)"
+            aria-label="ปิด"
+            className="absolute right-4 top-[max(1rem,env(safe-area-inset-top))] flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-lg text-white backdrop-blur-md transition active:bg-white/30"
           >
             ✕
           </button>
 
-          <div
-            className="relative w-full max-w-3xl h-[80vh] flex items-center justify-center"
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={selectedImage}
+            alt="รูปใบเสร็จ"
+            referrerPolicy="no-referrer"
             onClick={(e) => e.stopPropagation()}
-          >
-            <div className="relative w-full h-full">
-              <Image
-                src={selectedImage}
-                alt="Receipt Full"
-                fill
-                unoptimized
-                className="object-contain drop-shadow-2xl"
-              />
-            </div>
-          </div>
+            className="max-h-[85dvh] max-w-full rounded-xl object-contain shadow-2xl"
+          />
         </div>
       )}
     </div>
