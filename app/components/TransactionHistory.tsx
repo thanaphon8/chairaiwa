@@ -79,7 +79,7 @@ export default function TransactionHistory({
     };
   }, [selectedImage]);
 
-  // 1. Filter รายการทั้งหมด
+  // Filter รายการ
   const filteredTransactions = useMemo(() => {
     return transactions.filter((tx) => {
       const matchesSearch =
@@ -97,8 +97,12 @@ export default function TransactionHistory({
     setCurrentPage(1);
   }, [searchTerm, filterCategory]);
 
-  // 2. จัดกลุ่ม และ คำนวณยอดรวมรายวันจาก "รายการทั้งหมดที่ผ่านการ Filter" (ไม่ใช่เฉพาะหน้านั้น)
-  const allGroupedTransactions = useMemo(() => {
+  const paginatedTransactions = useMemo(() => {
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredTransactions.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  }, [filteredTransactions, currentPage]);
+
+  const groupedTransactions = useMemo(() => {
     const groups: { [key: string]: GroupSummary } = {};
 
     const now = new Date();
@@ -115,7 +119,7 @@ export default function TransactionHistory({
       `${day}/${month}/${String(yearCE).slice(-2)}`,
     ];
 
-    filteredTransactions.forEach((tx) => {
+    paginatedTransactions.forEach((tx) => {
       const cleanDate = extractDateOnly(tx.date);
       const isToday = todayFormats.includes(cleanDate);
 
@@ -145,41 +149,7 @@ export default function TransactionHistory({
     });
 
     return groups;
-  }, [filteredTransactions]);
-
-  // 3. ตัดแบ่งรายการสำหรับแสดงผลตาม Pagination
-  const paginatedGroupedTransactions = useMemo(() => {
-    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-    const endIndex = startIndex + ITEMS_PER_PAGE;
-    
-    // ดึงเฉพาะไอเทมของหน้านั้น
-    const pageItems = filteredTransactions.slice(startIndex, endIndex);
-
-    const resultGroups: { [key: string]: GroupSummary } = {};
-
-    pageItems.forEach((tx) => {
-      const cleanDate = extractDateOnly(tx.date);
-      const groupKey = cleanDate || "unknown";
-
-      // ดึงข้อมูลยอดรวมวันนั้นๆ จาก Master Group (allGroupedTransactions)
-      const masterGroup = allGroupedTransactions[groupKey];
-
-      if (!resultGroups[groupKey] && masterGroup) {
-        resultGroups[groupKey] = {
-          label: masterGroup.label,
-          items: [],
-          totalDailyIncome: masterGroup.totalDailyIncome, // ยอดรวมทั้งวัน
-          totalDailyExpense: masterGroup.totalDailyExpense, // ยอดรวมทั้งวัน
-        };
-      }
-
-      if (resultGroups[groupKey]) {
-        resultGroups[groupKey].items.push(tx);
-      }
-    });
-
-    return resultGroups;
-  }, [filteredTransactions, allGroupedTransactions, currentPage]);
+  }, [paginatedTransactions]);
 
   const handlePageChange = (page: number) => {
     if (page >= 1 && page <= totalPages) {
@@ -188,7 +158,7 @@ export default function TransactionHistory({
   };
 
   return (
-    <div className="bg-transparent sm:bg-white rounded-none sm:rounded-3xl p-0 sm:p-8 shadow-none sm:shadow-sm border-none sm:border border-gray-100">
+    <div className="bg-white rounded-none sm:rounded-3xl p-5 sm:p-8 shadow-sm border-y sm:border border-gray-100">
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
         <div>
           <h3 className="text-lg sm:text-xl font-bold text-gray-800">
@@ -233,21 +203,20 @@ export default function TransactionHistory({
             ></div>
           ))}
         </div>
-      ) : Object.keys(paginatedGroupedTransactions).length === 0 ? (
+      ) : Object.keys(groupedTransactions).length === 0 ? (
         <p className="text-center text-gray-400 py-8 text-sm">
           ไม่พบรายการบันทึก
         </p>
       ) : (
         <div className="space-y-6">
-          {Object.entries(paginatedGroupedTransactions).map(([dateKey, group]) => (
+          {Object.entries(groupedTransactions).map(([dateKey, group]) => (
             <div key={dateKey} className="space-y-3">
-              {/* แถบวันที่ และ ยอดสรุปรายวันในบรรทัดเดียวกัน */}
-              <div className="flex items-center justify-between gap-2 border-b border-gray-100 pb-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2">
                 <span className="bg-gray-100 text-gray-700 font-semibold px-3 py-1 rounded-full text-xs shadow-sm border border-gray-200">
                   {group.label}
                 </span>
 
-                <div className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm font-bold">
+                <div className="flex items-center gap-3 text-xs sm:text-sm font-bold">
                   {group.totalDailyIncome > 0 && (
                     <span className="text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-md border border-emerald-100">
                       +฿{group.totalDailyIncome.toLocaleString()}
