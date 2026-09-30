@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import Image from "next/image";
 
 type CategoryOption = {
@@ -92,15 +92,28 @@ export default function AddTransactionForm({
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const sliderTrackRef = useRef<HTMLDivElement>(null);
   const dragStartXRef = useRef<number>(0);
+  const currentSliderPosRef = useRef<number>(0);
   const animationFrameRef = useRef<number | null>(null);
 
   // Ref สำหรับ File Input
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Cleanup Object URL เพื่อป้องกัน Memory Leak
+  useEffect(() => {
+    return () => {
+      if (filePreview) {
+        URL.revokeObjectURL(filePreview);
+      }
+    };
+  }, [filePreview]);
+
   // Handle File Change
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (filePreview) {
+        URL.revokeObjectURL(filePreview);
+      }
       setImageFile(file);
       const objectUrl = URL.createObjectURL(file);
       setFilePreview(objectUrl);
@@ -124,6 +137,7 @@ export default function AddTransactionForm({
     if (!amount || isNaN(Number(amount))) {
       alert("กรุณาระบุจำนวนเงินให้ถูกต้อง");
       setSliderPosition(0);
+      currentSliderPosRef.current = 0;
       return;
     }
 
@@ -161,8 +175,6 @@ export default function AddTransactionForm({
 
       if (!result.success) {
         alert("เกิดข้อผิดพลาดในการบันทึก: " + result.error);
-        setLoading(false);
-        setSliderPosition(0);
         return;
       }
 
@@ -179,26 +191,25 @@ export default function AddTransactionForm({
     } finally {
       setLoading(false);
       setSliderPosition(0);
+      currentSliderPosRef.current = 0;
     }
   };
 
   // Slider Logic
-  const getMaxDrag = () => {
+  const getMaxDrag = useCallback(() => {
     if (!sliderTrackRef.current) return 0;
     const trackWidth = sliderTrackRef.current.clientWidth;
     const handleWidth = 56;
     return trackWidth - handleWidth - 8;
-  };
+  }, []);
 
   const handleStart = (clientX: number) => {
     if (loading) return;
     setIsDragging(true);
-    dragStartXRef.current = clientX - sliderPosition;
+    dragStartXRef.current = clientX - currentSliderPosRef.current;
   };
 
-  const handleMove = (clientX: number) => {
-    if (!isDragging || loading) return;
-
+  const handleMove = useCallback((clientX: number) => {
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
     }
@@ -208,35 +219,37 @@ export default function AddTransactionForm({
       let newX = clientX - dragStartXRef.current;
       if (newX < 0) newX = 0;
       if (newX > maxDrag) newX = maxDrag;
+      currentSliderPosRef.current = newX;
       setSliderPosition(newX);
     });
-  };
+  }, [getMaxDrag]);
 
-  const handleEnd = () => {
-    if (!isDragging || loading) return;
+  const handleEnd = useCallback(() => {
     setIsDragging(false);
     const maxDrag = getMaxDrag();
 
-    if (sliderPosition >= maxDrag * 0.85) {
+    if (currentSliderPosRef.current >= maxDrag * 0.85) {
       setSliderPosition(maxDrag);
+      currentSliderPosRef.current = maxDrag;
       submitData();
     } else {
       setSliderPosition(0);
+      currentSliderPosRef.current = 0;
     }
-  };
+  }, [getMaxDrag]);
 
   useEffect(() => {
+    if (!isDragging) return;
+
     const onMouseMove = (e: MouseEvent) => handleMove(e.clientX);
     const onMouseUp = () => handleEnd();
     const onTouchMove = (e: TouchEvent) => handleMove(e.touches[0].clientX);
     const onTouchEnd = () => handleEnd();
 
-    if (isDragging) {
-      window.addEventListener("mousemove", onMouseMove, { passive: true });
-      window.addEventListener("mouseup", onMouseUp);
-      window.addEventListener("touchmove", onTouchMove, { passive: true });
-      window.addEventListener("touchend", onTouchEnd);
-    }
+    window.addEventListener("mousemove", onMouseMove, { passive: true });
+    window.addEventListener("mouseup", onMouseUp);
+    window.addEventListener("touchmove", onTouchMove, { passive: true });
+    window.addEventListener("touchend", onTouchEnd);
 
     return () => {
       window.removeEventListener("mousemove", onMouseMove);
@@ -247,7 +260,7 @@ export default function AddTransactionForm({
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [isDragging, sliderPosition]);
+  }, [isDragging, handleMove, handleEnd]);
 
   // พรีเซตของหมวดหมู่ที่เลือกอยู่ปัจจุบัน
   const activePresets =
@@ -262,7 +275,7 @@ export default function AddTransactionForm({
       </h3>
 
       <div className="space-y-5">
-        {/* สลับ รายจ่าย / รายรับ (สไตล์เดียวกับหมวดหมู่) */}
+        {/* สลับ รายจ่าย / รายรับ */}
         <div className="grid grid-cols-2 gap-4">
           {/* ปุ่ม รายจ่าย */}
           <button
@@ -388,13 +401,12 @@ export default function AddTransactionForm({
           </div>
         )}
 
-        {/* จำนวนเงิน - ดีไซน์กระเป๋าสตางค์สีน้ำตาลเข้ม */}
+        {/* จำนวนเงิน */}
         <div>
           <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
             จำนวนเงิน
           </label>
           <div className="relative flex items-center group">
-            {/* ไอคอนกระเป๋าสตางค์หนังสีน้ำตาลเข้ม */}
             <div className="absolute left-3.5 z-10 flex items-center justify-center w-10 h-10 bg-[#4A2E1F] rounded-2xl shadow-md border border-[#362115] transition-transform duration-200 group-hover:scale-105">
               <svg
                 className="w-5 h-5 text-[#E0C097]"
@@ -406,7 +418,6 @@ export default function AddTransactionForm({
               </svg>
             </div>
 
-            {/* ช่องกรอกจำนวนเงิน */}
             <input
               type="number"
               step="any"
@@ -419,7 +430,6 @@ export default function AddTransactionForm({
               required
             />
 
-            {/* ข้อความหน่วยเงิน */}
             <span className="absolute right-5 text-sm font-bold text-[#5C3D2E]/60 pointer-events-none">
               THB (฿)
             </span>
@@ -437,7 +447,7 @@ export default function AddTransactionForm({
               onClick={() => setShowNotePresets((prev) => !prev)}
               className="text-xs font-semibold text-zinc-600 hover:text-zinc-900 underline transition-colors"
             >
-              {showNotePresets ? "ซ่อนตัวเลือกด่วน" : "⚡ ตัวเลือกด่วน"}
+              {showNotePresets ? "ซ่อนตัวเลือกด่วน" : "ตัวเลือกด่วน"}
             </button>
           </div>
 
@@ -450,7 +460,6 @@ export default function AddTransactionForm({
             placeholder="เช่น ข้าวกะเพราหมูกรอบ, เติมบัตรแรบบิท"
           />
 
-          {/* Quick Presets Animation */}
           <div
             className={`grid transition-all duration-300 ease-out overflow-hidden ${
               showNotePresets && activePresets.length > 0
