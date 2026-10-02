@@ -85,6 +85,7 @@ export default function TransactionHistory({
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [failedImages, setFailedImages] = useState<Set<number>>(new Set());
+  const [incomeIconFailed, setIncomeIconFailed] = useState<boolean>(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const getCategoryInfo = (cat: string) => {
@@ -343,13 +344,37 @@ export default function TransactionHistory({
                       <li key={tx.id} className="flex items-center gap-3 py-3.5 lg:gap-4 lg:py-4 lg:transition-colors lg:hover:bg-zinc-50/70">
                         {/* ไอคอนหมวดหมู่ */}
                         <div className="relative h-11 w-11 shrink-0 rounded-full bg-[#5C38C9]/10 lg:h-12 lg:w-12">
-                          <Image
-                            src={isIncome ? "/img/income.png" : catInfo.image}
-                            alt=""
-                            fill
-                            sizes="48px"
-                            className="object-contain p-2"
-                          />
+                          {isIncome && incomeIconFailed ? (
+                            // สำรอง: ถ้าโหลดไฟล์ income.png ไม่ได้ จะขึ้นไอคอนลูกศรแทน ไม่ปล่อยว่าง
+                            <svg
+                              className="absolute inset-0 m-auto h-6 w-6 text-emerald-600"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth={2}
+                              viewBox="0 0 24 24"
+                              aria-hidden="true"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M12 5v14m0 0l-5-5m5 5l5-5"
+                              />
+                            </svg>
+                          ) : (
+                            <Image
+                              src={isIncome ? "/img/income.png" : catInfo.image}
+                              alt=""
+                              fill
+                              sizes="48px"
+                              unoptimized={isIncome}
+                              onError={
+                                isIncome
+                                  ? () => setIncomeIconFailed(true)
+                                  : undefined
+                              }
+                              className="object-contain p-2"
+                            />
+                          )}
                         </div>
 
                         {/* ชื่อรายการ */}
