@@ -30,10 +30,11 @@ const PRESETS_BY_CATEGORY: Record<string, string[]> = {
     "ข้าวมันไก่",
     "ก๋วยเตี๋ยว",
     "ข้าวไข่เจียว",
-    "กาแฟสด",
+    "กาแฟ",
     "ชาไทย",
     "หมูกระทะ",
     "ของกิน 7-Eleven",
+    "น้ำดื่ม",
   ],
   เดินทาง: [
     "ไปทำงาน",
@@ -361,7 +362,7 @@ export default function AddTransactionForm({
       ? PRESETS_BY_CATEGORY[currentCategoryLabel] ||
         PRESETS_BY_CATEGORY[category] ||
         []
-      : ["เงินเดือน", "โบนัส", "ขายของ", "ได้รับคืน", "ดอกเบี้ย", "อื่นๆ"];
+      : ["เงินเดือน", "กดเงินสด", "โบนัส", "ขายของ", "ได้รับคืน", "ดอกเบี้ย", "อื่นๆ"];  
 
   const focusRing =
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5C38C9] focus-visible:ring-offset-2";
