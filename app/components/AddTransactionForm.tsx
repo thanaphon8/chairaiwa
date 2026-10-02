@@ -128,44 +128,209 @@ async function getOcrWorker() {
   return ocrWorkerPromise;
 }
 
-// หาจำนวนเงินจากข้อความที่อ่านได้
-// สลีปโอนเงินแสดงจำนวนเงินเป็นตัวเลข 2 ทศนิยม เช่น 1,000.00
-function extractAmountFromText(text: string): number | null {
-  const numberRe = /(\d{1,3}(?:,\d{3})+|\d+)\.\d{2}(?!\d)/g;
+// ---------- วิเคราะห์ข้อความที่อ่านได้ เพื่อหาจำนวนเงิน ----------
+// ปัญหาเดิม: เมื่อไม่เจอคำสำคัญ ระบบเลือก "ตัวเลขทศนิยมที่มากที่สุด" ซึ่งไปหยิบเวลา/วันที่
+// (เช่น 19.37 น.) แทนยอดเงินน้อยๆ อย่าง 17.00 หรือ 30.00 ได้
+// ตอนนี้: ตัดเวลา/วันที่ออก แล้วให้คะแนนแต่ละตัวเลข
+
+type AmountCandidate = { value: number; score: number; order: number };
+
+function extractCandidates(text: string): AmountCandidate[] {
+  const decimalRe = /(\d{1,3}(?:,\d{3})+|\d+)[.,](\d{2})(?!\d)/g;
+  const currencyIntRe = /(\d{1,3}(?:,\d{3})+|\d+)\s*(?:บาท|baht|thb)/gi;
   const keywordRe = /(amount|baht|thb|บาท|จำนวน)/i;
+  // ตามหลังตัวเลขคือ "น." / am / pm (OCR อาจอ่าน น. เป็น u หรือ n)
+  const timeAfterRe = /^\s*(?:น\.?|am\b|pm\b|hrs?\b|[uUnN]\.?\s*$)/i;
 
-  let keywordHit: number | null = null;
-  const all: number[] = [];
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const out: AmountCandidate[] = [];
+  let order = 0;
 
-  for (const line of text.split(/\r?\n/)) {
-    const matches = line.match(numberRe);
-    if (!matches) continue;
-    for (const m of matches) {
-      const n = parseFloat(m.replace(/,/g, ""));
-      if (!isFinite(n) || n <= 0) continue; // ข้ามค่าธรรมเนียม 0.00
-      all.push(n);
-      if (keywordHit === null && keywordRe.test(line)) keywordHit = n;
+  for (const line of lines) {
+    const hasKeyword = keywordRe.test(line);
+    decimalRe.lastIndex = 0;
+    let m: RegExpExecArray | null;
+
+    while ((m = decimalRe.exec(line)) !== null) {
+      const intPart = m[1];
+      const dec = m[2];
+      const value = parseFloat(intPart.replace(/,/g, "") + "." + dec);
+      if (!isFinite(value) || value <= 0) continue; // ข้ามค่าธรรมเนียม 0.00
+
+      const after = line.slice(m.index + m[0].length);
+      const before = line.slice(0, m.index);
+
+      // เป็นส่วนหนึ่งของวันที่/เลขลำดับ เช่น 02.10.2569
+      if (/^[.\/\-]\d/.test(after) || /\d[.\/\-]$/.test(before)) continue;
+      // เป็นเวลา เช่น 19.37 น.
+      if (timeAfterRe.test(after)) continue;
+
+      let score = 0;
+      if (hasKeyword) score += 100; // บรรทัดที่มี จำนวน/Amount/THB/Baht
+      if (dec === "00") score += 10; // ยอดโอนส่วนใหญ่ลงท้าย .00
+      const looksLikeTime =
+        !intPart.includes(",") &&
+        Number(intPart) <= 23 &&
+        Number(dec) <= 59 &&
+        dec !== "00";
+      if (looksLikeTime && !hasKeyword) score -= 20; // หน้าตาเหมือนเวลา ให้ลำดับท้ายๆ
+
+      out.push({ value, score, order: order++ });
     }
   }
 
-  if (keywordHit !== null) return keywordHit; // บรรทัดที่มีคำว่า จำนวน/Amount/THB/Baht
-  if (all.length > 0) return Math.max(...all); // ไม่เจอคำสำคัญ ใช้ค่าที่มากที่สุด
-  return null;
+  // ไม่มีทศนิยมเลย: ลองหารูปแบบ "17 บาท" / "17 THB"
+  if (out.length === 0) {
+    for (const line of lines) {
+      currencyIntRe.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = currencyIntRe.exec(line)) !== null) {
+        const value = parseFloat(m[1].replace(/,/g, ""));
+        if (isFinite(value) && value > 0) {
+          out.push({ value, score: 50, order: order++ });
+        }
+      }
+    }
+  }
+
+  return out;
+}
+
+function pickAmount(text: string): number | null {
+  const cands = extractCandidates(text);
+  if (cands.length === 0) return null;
+  // คะแนนสูงสุดก่อน ถ้าเท่ากันเอาตัวที่อยู่บนสุดของสลีป
+  cands.sort((a, b) => b.score - a.score || a.order - b.order);
+  return cands[0].value;
+}
+
+// ---------- เตรียมรูปให้ OCR อ่านง่ายขึ้น ----------
+// ตัวเลขสั้นๆ ตัวเล็ก (เช่น 17.00) อ่านพลาดง่ายกว่าตัวเลขยาวๆ
+// วิธีแก้: ขยายรูปให้ตัวหนังสือใหญ่พอ (ของเดิมย่อรูปลง ทำให้ตัวเลขเล็กลงอีก)
+// แล้วอ่านหลายแบบ: ภาพเทา / ขาวดำ / ขาวดำกลับสี (ตัวหนังสือขาวบนพื้นสี)
+
+function otsuThreshold(hist: number[], total: number): number {
+  let sum = 0;
+  for (let i = 0; i < 256; i++) sum += i * hist[i];
+
+  let sumB = 0;
+  let wB = 0;
+  let maxVar = 0;
+  let threshold = 128;
+
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t];
+    if (wB === 0) continue;
+    const wF = total - wB;
+    if (wF === 0) break;
+    sumB += t * hist[t];
+    const mB = sumB / wB;
+    const mF = (sum - sumB) / wF;
+    const between = wB * wF * (mB - mF) * (mB - mF);
+    if (between > maxVar) {
+      maxVar = between;
+      threshold = t;
+    }
+  }
+  return threshold;
+}
+
+async function buildOcrImages(file: File): Promise<HTMLCanvasElement[]> {
+  const bitmap = await createImageBitmap(file);
+
+  // ปรับให้กว้างประมาณ 1400-2000px (รูปเล็กขยายขึ้น รูปใหญ่มากย่อลง) และไม่ให้สูงเกิน 4200px
+  const targetW = Math.min(Math.max(bitmap.width, 1400), 2000);
+  let scale = targetW / bitmap.width;
+  if (bitmap.height * scale > 4200) scale = 4200 / bitmap.height;
+  const w = Math.max(1, Math.round(bitmap.width * scale));
+  const h = Math.max(1, Math.round(bitmap.height * scale));
+
+  const base = document.createElement("canvas");
+  base.width = w;
+  base.height = h;
+  const ctx = base.getContext("2d", { willReadFrequently: true });
+  if (!ctx) throw new Error("canvas not supported");
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  bitmap.close?.();
+
+  const px = ctx.getImageData(0, 0, w, h).data;
+  const gray = new Uint8ClampedArray(w * h);
+  const hist = new Array<number>(256).fill(0);
+  for (let i = 0, j = 0; i < px.length; i += 4, j++) {
+    const g = ((px[i] * 299 + px[i + 1] * 587 + px[i + 2] * 114) / 1000) | 0;
+    gray[j] = g;
+    hist[g]++;
+  }
+  const threshold = otsuThreshold(hist, w * h);
+
+  const make = (fn: (g: number) => number) => {
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    const cx = c.getContext("2d")!;
+    const out = cx.createImageData(w, h);
+    for (let j = 0, k = 0; j < gray.length; j++, k += 4) {
+      const v = fn(gray[j]);
+      out.data[k] = v;
+      out.data[k + 1] = v;
+      out.data[k + 2] = v;
+      out.data[k + 3] = 255;
+    }
+    cx.putImageData(out, 0, 0);
+    return c;
+  };
+
+  return [
+    make((g) => g), // 1) ภาพเทา
+    make((g) => (g > threshold ? 255 : 0)), // 2) ขาวดำ
+    make((g) => (g > threshold ? 0 : 255)), // 3) ขาวดำกลับสี
+  ];
 }
 
 async function readAmountFromImage(file: File): Promise<number | null> {
-  // ย่อรูปใหญ่ๆ ก่อน (อ่านเร็วขึ้น กินเมมโมรี่น้อยลง บนมือถือ)
-  const prepared = await compressImage(file, 1800, 0.92);
   const worker = await getOcrWorker();
+  const images = await buildOcrImages(file);
 
-  const result = await Promise.race([
-    worker.recognize(prepared),
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("OCR timeout")), 45000)
-    ),
-  ]);
+  const votes: number[] = [];
+  const startedAt = Date.now();
 
-  return extractAmountFromText(result.data.text || "");
+  for (const img of images) {
+    if (Date.now() - startedAt > 40000) break; // กันรอนานเกินไปบนเครื่องช้า
+
+    try {
+      const result = await Promise.race([
+        worker.recognize(img),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("OCR timeout")), 30000)
+        ),
+      ]);
+
+      const text = result.data.text || "";
+      console.debug("[OCR text]", text); // ถ้าอ่านผิด เปิด Console ดูข้อความดิบนี้ได้
+      const best = pickAmount(text);
+
+      if (best !== null) {
+        votes.push(best);
+        // อ่านได้ค่าเดียวกัน 2 แบบ ถือว่ามั่นใจ หยุดทันที (ปกติเสร็จแค่ 2 รอบ)
+        if (votes.filter((v) => v === best).length >= 2) return best;
+      }
+    } catch (err) {
+      console.error("OCR pass failed:", err);
+      break;
+    }
+  }
+
+  if (votes.length === 0) return null;
+
+  // ไม่มีค่าที่ตรงกัน: เลือกค่าที่ซ้ำมากที่สุด ถ้าเท่ากันเอาจากรอบแรก
+  const counts = new Map<number, number>();
+  votes.forEach((v) => counts.set(v, (counts.get(v) || 0) + 1));
+  let best = votes[0];
+  counts.forEach((c, v) => {
+    if (c > (counts.get(best) || 0)) best = v;
+  });
+  return best;
 }
 
 const formatOcrAmount = (n: number) =>
