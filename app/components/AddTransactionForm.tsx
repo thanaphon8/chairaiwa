@@ -9,9 +9,19 @@ type CategoryOption = {
   image: string;
 };
 
+// รายการที่เพิ่งบันทึกสำเร็จ (ส่งให้หน้าแม่เอาไปแสดงทันที ไม่ต้องรอดึงข้อมูลทั้งชีตใหม่)
+export type NewTransaction = {
+  type: "income" | "expense";
+  amount: number;
+  category: string;
+  note: string;
+  imageUrl: string | null;
+  date: string;
+};
+
 type AddTransactionFormProps = {
   categories?: CategoryOption[];
-  onSuccess: () => void | Promise<void>;
+  onSuccess: (tx: NewTransaction) => void | Promise<void>;
 };
 
 const PRESETS_BY_CATEGORY: Record<string, string[]> = {
@@ -228,7 +238,7 @@ export default function AddTransactionForm({
         body: formData,
       });
 
-      let result: { success: boolean; error?: string };
+      let result: { success: boolean; error?: string; imageUrl?: string | null };
       try {
         result = await res.json();
       } catch {
@@ -243,7 +253,14 @@ export default function AddTransactionForm({
         return;
       }
 
-      await onSuccess();
+      await onSuccess({
+        type,
+        amount: numericAmount,
+        category: txCategory,
+        note: currentNote,
+        imageUrl: result.imageUrl ?? null,
+        date: formattedDateStr,
+      });
 
       setAmount("");
       setNote("");
