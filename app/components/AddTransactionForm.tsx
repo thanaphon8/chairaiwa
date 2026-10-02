@@ -30,11 +30,10 @@ const PRESETS_BY_CATEGORY: Record<string, string[]> = {
     "ข้าวมันไก่",
     "ก๋วยเตี๋ยว",
     "ข้าวไข่เจียว",
-    "กาแฟ",
+    "กาแฟสด",
     "ชาไทย",
     "หมูกระทะ",
     "ของกิน 7-Eleven",
-    "น้ำดื่ม",
   ],
   เดินทาง: [
     "ไปทำงาน",
@@ -106,6 +105,71 @@ async function compressImage(
   }
 }
 
+// ================= อ่านจำนวนเงินจากสลีป (OCR ในเบราว์เซอร์) =================
+// ใช้ tesseract.js: ประมวลผลบนเครื่องผู้ใช้ รูปไม่ถูกส่งไปที่ไหนเพื่อการอ่านนี้
+// ครั้งแรกจะดาวน์โหลดโมเดลภาษา (ไม่กี่ MB) แล้วเบราว์เซอร์จำไว้ ครั้งต่อไปเร็วขึ้น
+
+let ocrWorkerPromise: Promise<import("tesseract.js").Worker> | null = null;
+
+async function getOcrWorker() {
+  if (!ocrWorkerPromise) {
+    ocrWorkerPromise = (async () => {
+      const { createWorker, PSM } = await import("tesseract.js");
+      const worker = await createWorker("eng");
+      // สลีปมีข้อความกระจายหลายจุด โหมด sparse อ่านได้ดีกว่า
+      await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT });
+      return worker;
+    })().catch((err) => {
+      ocrWorkerPromise = null; // โหลดไม่สำเร็จ ให้ลองใหม่ได้ครั้งหน้า
+      throw err;
+    });
+  }
+  return ocrWorkerPromise;
+}
+
+// หาจำนวนเงินจากข้อความที่อ่านได้
+// สลีปโอนเงินแสดงจำนวนเงินเป็นตัวเลข 2 ทศนิยม เช่น 1,000.00
+function extractAmountFromText(text: string): number | null {
+  const numberRe = /(\d{1,3}(?:,\d{3})+|\d+)\.\d{2}(?!\d)/g;
+  const keywordRe = /(amount|baht|thb|บาท|จำนวน)/i;
+
+  let keywordHit: number | null = null;
+  const all: number[] = [];
+
+  for (const line of text.split(/\r?\n/)) {
+    const matches = line.match(numberRe);
+    if (!matches) continue;
+    for (const m of matches) {
+      const n = parseFloat(m.replace(/,/g, ""));
+      if (!isFinite(n) || n <= 0) continue; // ข้ามค่าธรรมเนียม 0.00
+      all.push(n);
+      if (keywordHit === null && keywordRe.test(line)) keywordHit = n;
+    }
+  }
+
+  if (keywordHit !== null) return keywordHit; // บรรทัดที่มีคำว่า จำนวน/Amount/THB/Baht
+  if (all.length > 0) return Math.max(...all); // ไม่เจอคำสำคัญ ใช้ค่าที่มากที่สุด
+  return null;
+}
+
+async function readAmountFromImage(file: File): Promise<number | null> {
+  // ย่อรูปใหญ่ๆ ก่อน (อ่านเร็วขึ้น กินเมมโมรี่น้อยลง บนมือถือ)
+  const prepared = await compressImage(file, 1800, 0.92);
+  const worker = await getOcrWorker();
+
+  const result = await Promise.race([
+    worker.recognize(prepared),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("OCR timeout")), 45000)
+    ),
+  ]);
+
+  return extractAmountFromText(result.data.text || "");
+}
+
+const formatOcrAmount = (n: number) =>
+  Number.isInteger(n) ? String(n) : n.toFixed(2);
+
 export default function AddTransactionForm({
   categories = [],
   onSuccess,
@@ -117,6 +181,14 @@ export default function AddTransactionForm({
   const [type, setType] = useState<"income" | "expense">("expense");
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [filePreview, setFilePreview] = useState<string | null>(null);
+
+  // สถานะการอ่านจำนวนเงินจากสลีป
+  const [ocrStatus, setOcrStatus] = useState<
+    "idle" | "reading" | "done" | "fail"
+  >("idle");
+  const [ocrAmount, setOcrAmount] = useState<number | null>(null);
+  const ocrTokenRef = useRef<number>(0); // กันผลลัพธ์ของรูปเก่ามาทับ
+  const autoFilledRef = useRef<boolean>(false); // จำนวนเงินปัจจุบันมาจาก OCR หรือไม่
 
   useEffect(() => {
     if (categories.length > 0 && !categories.some((c) => c.id === category)) {
@@ -161,6 +233,36 @@ export default function AddTransactionForm({
       setImageFile(file);
       const objectUrl = URL.createObjectURL(file);
       setFilePreview(objectUrl);
+      runOcr(file);
+    }
+  };
+
+  // อ่านจำนวนเงินจากรูป แล้วใส่ช่องจำนวนเงินให้ (เฉพาะตอนช่องว่าง หรือค่าเดิมมาจาก OCR)
+  // ไม่เขียนทับตัวเลขที่ผู้ใช้พิมพ์เอง
+  const runOcr = async (file: File) => {
+    const token = ++ocrTokenRef.current;
+    setOcrStatus("reading");
+
+    try {
+      const value = await readAmountFromImage(file);
+      if (token !== ocrTokenRef.current) return; // ผู้ใช้เปลี่ยน/ลบรูปไปแล้ว
+
+      if (value === null) {
+        setOcrStatus("fail");
+        return;
+      }
+
+      if (amountRef.current.trim() === "" || autoFilledRef.current) {
+        setAmount(formatOcrAmount(value));
+        autoFilledRef.current = true;
+        setOcrAmount(value);
+        setOcrStatus("done");
+      } else {
+        setOcrStatus("idle"); // ผู้ใช้กรอกเองไว้แล้ว ไม่ยุ่ง
+      }
+    } catch (err) {
+      console.error("OCR error:", err);
+      if (token === ocrTokenRef.current) setOcrStatus("fail");
     }
   };
 
@@ -173,11 +275,21 @@ export default function AddTransactionForm({
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
+
+    // ยกเลิกการอ่านที่ค้างอยู่ และล้างตัวเลขที่ OCR ใส่ให้ (ถ้าผู้ใช้ยังไม่ได้แก้เอง)
+    ocrTokenRef.current++;
+    setOcrStatus("idle");
+    setOcrAmount(null);
+    if (autoFilledRef.current) {
+      setAmount("");
+      autoFilledRef.current = false;
+    }
   };
 
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let val = e.target.value;
     val = val.replace(/[^0-9.,]/g, "");
+    autoFilledRef.current = false; // ผู้ใช้แก้เอง -> ถือเป็นค่าของผู้ใช้
     setAmount(val);
   };
 
@@ -362,7 +474,7 @@ export default function AddTransactionForm({
       ? PRESETS_BY_CATEGORY[currentCategoryLabel] ||
         PRESETS_BY_CATEGORY[category] ||
         []
-      : ["เงินเดือน", "กดเงินสด", "โบนัส", "ขายของ", "ได้รับคืน", "ดอกเบี้ย", "อื่นๆ"];  
+      : ["เงินเดือน", "โบนัส", "ขายของ", "ได้รับคืน", "ดอกเบี้ย", "อื่นๆ"];
 
   const focusRing =
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5C38C9] focus-visible:ring-offset-2";
@@ -602,6 +714,33 @@ export default function AddTransactionForm({
                 ลบ
               </button>
             </div>
+          )}
+
+          {ocrStatus !== "idle" && (
+            <p
+              role="status"
+              className={`mt-2.5 flex items-center gap-2 text-xs ${
+                ocrStatus === "done" ? "text-emerald-700" : "text-zinc-500"
+              }`}
+            >
+              {ocrStatus === "reading" && (
+                <>
+                  <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-[#5C38C9] border-t-transparent" />
+                  กำลังอ่านจำนวนเงินจากรูป...
+                </>
+              )}
+              {ocrStatus === "done" && ocrAmount !== null && (
+                <>
+                  ใส่จำนวนเงิน ฿
+                  {ocrAmount.toLocaleString("th-TH", {
+                    maximumFractionDigits: 2,
+                  })}{" "}
+                  ให้แล้ว กรุณาตรวจสอบก่อนบันทึก
+                </>
+              )}
+              {ocrStatus === "fail" &&
+                "อ่านจำนวนเงินจากรูปไม่ได้ กรอกเองได้เลย"}
+            </p>
           )}
         </div>
 
