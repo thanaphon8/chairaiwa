@@ -353,6 +353,20 @@ export default function AddTransactionForm({
     "idle" | "reading" | "done" | "fail"
   >("idle");
   const [ocrAmount, setOcrAmount] = useState<number | null>(null);
+  // ความสูงของส่วนตัวเลือกด่วน (วัดจริง เพื่อให้ขยับนุ่มๆ เวลาเปลี่ยนหมวด)
+  const presetsInnerRef = useRef<HTMLDivElement>(null);
+  const [presetsHeight, setPresetsHeight] = useState<number | "auto">("auto");
+
+  useEffect(() => {
+    const el = presetsInnerRef.current;
+    if (!el) return;
+    setPresetsHeight(el.offsetHeight);
+    const observer = new ResizeObserver(() => setPresetsHeight(el.offsetHeight));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const [showPreview, setShowPreview] = useState<boolean>(false); // เปิดดูรูปที่แนบเป็นภาพใหญ่
   const ocrTokenRef = useRef<number>(0); // กันผลลัพธ์ของรูปเก่ามาทับ
   const autoFilledRef = useRef<boolean>(false); // จำนวนเงินปัจจุบันมาจาก OCR หรือไม่
 
@@ -368,7 +382,6 @@ export default function AddTransactionForm({
   const noteRef = useRef<string>("");
   noteRef.current = note;
 
-  const [showNotePresets, setShowNotePresets] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const submittingRef = useRef<boolean>(false); // กันกดซ้ำ
 
@@ -389,6 +402,23 @@ export default function AddTransactionForm({
       }
     };
   }, [filePreview]);
+
+  useEffect(() => {
+    if (!showPreview) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowPreview(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [showPreview]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -444,6 +474,7 @@ export default function AddTransactionForm({
 
     // ยกเลิกการอ่านที่ค้างอยู่ และล้างตัวเลขที่ OCR ใส่ให้ (ถ้าผู้ใช้ยังไม่ได้แก้เอง)
     ocrTokenRef.current++;
+    setShowPreview(false);
     setOcrStatus("idle");
     setOcrAmount(null);
     if (autoFilledRef.current) {
@@ -544,7 +575,6 @@ export default function AddTransactionForm({
       setAmount("");
       setNote("");
       noteRef.current = "";
-      setShowNotePresets(false);
       handleRemoveFile();
     } catch (error) {
       console.error(error);
@@ -647,6 +677,14 @@ export default function AddTransactionForm({
 
   return (
     <div className="-mx-4 bg-white px-5 py-6 sm:mx-0 sm:rounded-3xl sm:border sm:border-gray-100 sm:p-8 sm:shadow-sm">
+      <style>{`
+        @keyframes presetIn {
+          from { opacity: 0; transform: translateY(8px) scale(0.96); }
+          to { opacity: 1; transform: none; }
+        }
+        .preset-chip { animation: presetIn 340ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+        @media (prefers-reduced-motion: reduce) { .preset-chip { animation: none; } }
+      `}</style>
       <h3 className="text-lg font-semibold text-zinc-900 sm:text-xl">
         เพิ่มรายการใหม่
       </h3>
@@ -757,29 +795,19 @@ export default function AddTransactionForm({
           </div>
         </div>
 
-        {/* บันทึกช่วยจำ + ตัวเลือกด่วน */}
+        {/* บันทึกช่วยจำ + ตัวเลือกด่วน (แสดงตลอด เปลี่ยนตามหมวดหมู่ที่เลือก) */}
         <div>
-          <div className="mb-2.5 flex items-center justify-between">
-            <label
-              htmlFor="tx-note"
-              className="text-sm font-medium text-zinc-700"
-            >
-              บันทึกช่วยจำ
-            </label>
-            <button
-              type="button"
-              onClick={() => setShowNotePresets((prev) => !prev)}
-              className={`rounded-full px-2 py-1 text-sm font-medium text-[#5C38C9] ${focusRing}`}
-            >
-              {showNotePresets ? "ซ่อนตัวเลือกด่วน" : "ตัวเลือกด่วน"}
-            </button>
-          </div>
+          <label
+            htmlFor="tx-note"
+            className="mb-2.5 block text-sm font-medium text-zinc-700"
+          >
+            บันทึกช่วยจำ
+          </label>
 
           <input
             id="tx-note"
             type="text"
             value={note}
-            onFocus={() => setShowNotePresets(true)}
             onChange={(e) => {
               setNote(e.target.value);
               noteRef.current = e.target.value;
@@ -788,23 +816,26 @@ export default function AddTransactionForm({
             placeholder="เช่น ข้าวกะเพราหมูกรอบ"
           />
 
+          {/* กรอบนอก: ความสูงขยับนุ่มๆ ตามจำนวนชิปของแต่ละหมวด */}
           <div
-            className={`grid overflow-hidden transition-all duration-300 ease-out ${
-              showNotePresets && activePresets.length > 0
-                ? "mt-3 grid-rows-[1fr] opacity-100"
-                : "mt-0 grid-rows-[0fr] opacity-0"
-            }`}
+            className="mt-3 overflow-hidden transition-[height] duration-300 ease-out motion-reduce:transition-none"
+            style={{ height: presetsHeight }}
           >
-            <div className="min-h-0">
-              <div className="flex flex-wrap gap-2">
-                {activePresets.map((preset) => {
+            <div ref={presetsInnerRef}>
+              {/* key เปลี่ยนตามหมวด/ประเภท -> ชิปชุดใหม่เลื่อนขึ้นมาทีละตัว */}
+              <div
+                key={`${type}-${category}`}
+                className="flex flex-wrap gap-2 pb-0.5"
+              >
+                {activePresets.map((preset, i) => {
                   const isSelected = note === preset;
                   return (
                     <button
                       key={preset}
                       type="button"
                       onClick={() => handleSelectPreset(preset)}
-                      className={`h-9 rounded-full px-3.5 text-sm font-medium transition ${focusRing} ${
+                      style={{ animationDelay: `${i * 35}ms` }}
+                      className={`preset-chip h-9 rounded-full px-3.5 text-sm font-medium transition-colors ${focusRing} ${
                         isSelected
                           ? "bg-[#5C38C9] text-white"
                           : "bg-zinc-100 text-zinc-700 active:bg-zinc-200 lg:hover:bg-zinc-200"
@@ -857,7 +888,12 @@ export default function AddTransactionForm({
             </button>
           ) : (
             <div className="flex items-center gap-3 rounded-2xl bg-zinc-100 p-2.5">
-              <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-zinc-200">
+              <button
+                type="button"
+                onClick={() => setShowPreview(true)}
+                aria-label="ดูรูปใบเสร็จขนาดใหญ่"
+                className={`relative h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-zinc-200 ${focusRing}`}
+              >
                 <Image
                   src={filePreview}
                   alt="ตัวอย่างรูปใบเสร็จ"
@@ -865,12 +901,25 @@ export default function AddTransactionForm({
                   unoptimized
                   className="object-cover"
                 />
-              </div>
+                {/* ไอคอนแว่นขยาย บอกว่ากดดูรูปใหญ่ได้ */}
+                <span className="absolute bottom-1 right-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/55 text-white">
+                  <svg
+                    className="h-3 w-3"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2.5}
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <circle cx="11" cy="11" r="6" />
+                    <path strokeLinecap="round" d="M20 20l-4-4" />
+                  </svg>
+                </span>
+              </button>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-zinc-900">
                   {imageFile?.name || "รูปใบเสร็จ"}
                 </p>
-                <p className="text-xs text-zinc-500">แนบรูปแล้ว</p>
               </div>
               <button
                 type="button"
@@ -945,6 +994,40 @@ export default function AddTransactionForm({
           </div>
         </div>
       </div>
+
+      {/* ดูรูปใบเสร็จที่แนบ ขนาดใหญ่ (ก่อนกดบันทึก) */}
+      {showPreview && filePreview && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="ตรวจสอบรูปใบเสร็จ"
+          className="fixed inset-0 z-50 overflow-y-auto bg-black/85 backdrop-blur-sm"
+        >
+          <button
+            type="button"
+            onClick={() => setShowPreview(false)}
+            aria-label="ปิด"
+            className="fixed right-4 top-[max(1rem,env(safe-area-inset-top))] z-10 flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-lg text-white backdrop-blur-md transition active:bg-white/30"
+          >
+            ✕
+          </button>
+
+          {/* สลีปยาวๆ เลื่อนดูได้ในหน้านี้ แตะพื้นที่ว่างเพื่อปิด */}
+          <div
+            className="flex min-h-full items-center justify-center p-4"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setShowPreview(false);
+            }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={filePreview}
+              alt="รูปใบเสร็จที่แนบ"
+              className="h-auto w-full max-w-md rounded-xl shadow-2xl lg:max-w-lg"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
