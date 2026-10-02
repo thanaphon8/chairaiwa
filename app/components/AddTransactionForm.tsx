@@ -362,7 +362,7 @@ export default function AddTransactionForm({
       ? PRESETS_BY_CATEGORY[currentCategoryLabel] ||
         PRESETS_BY_CATEGORY[category] ||
         []
-      : ["เงินเดือน", "กดเงินสด", "โบนัส", "ขายของ", "ได้รับคืน", "ดอกเบี้ย", "อื่นๆ"];  
+      : ["เงินเดือน", "โบนัส", "ขายของ", "ได้รับคืน", "ดอกเบี้ย", "อื่นๆ"];  
 
   const focusRing =
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5C38C9] focus-visible:ring-offset-2";
